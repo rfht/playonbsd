@@ -1,0 +1,10 @@
+#!/bin/ksh
+
+# TODO: allow argument to manually select what engine type (fnaify, hashlink, renpy, AGS)
+
+# TODO: add detection of engine type
+
+# Hashlink, e.g. Dead Cells
+mkdir playonbsd-backup
+mv *.so{,.*} playonbsd-backup/
+mv *.hdll playonbsd-backup/
