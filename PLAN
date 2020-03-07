@@ -1,0 +1,38 @@
+Planned Features
+================
+
+Priority in parentheses
+
+* run games (1)
+* setup (fnaify, hashlink, make sure needed ports are present) (2)
+* download (depotdownloader, GOG API) (3)
+* detect games (4)
+* PRIVSEP - OpenBSD::Pledge (bentley asked)
+* emulator support (Hemno asked for it)
+* support games from packages
+* sync with GOG library, Steam library?
+* last played and total playtime for games
+* other stats? achievements? game completion?
+* include streaming features (fauxstream?)
+* game IDs - not sure what would be best identifier
+* check for and suggest updates to games
+* multiplayer?? - connect with friends, set up game sessions
+* social features? can mastodon or other social networks be leveraged?
+* playonbsd-cli, playonbsd-curses, playonbsd-gui versions?
+* write in Perl?
+* find, connect with, and create YouTube videos and other online reports/casts
+* Overlay?
+* screenshot function with sharing features?
+* discover new games - in ports, base, playonbsd.com?
+* VoIP for games via mumble?
+* controller setup help - SDL_GAMECONTROLLERCONFIG for example
+* cloud saves?
+* review games?
+* favorite games in the client?
+* Mods support??
+* backup games (not the ones installed in /usr/local)
+* broadcast currently played game via social features
+* chat?
+* sync library, settings between devices?
+* browser game support?
+* add benchmarks, benchmarking, and gaming-related system info, with option to upload performance data
