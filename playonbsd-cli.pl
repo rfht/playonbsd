@@ -2,8 +2,6 @@
 use strict;
 use warnings;
 
-use feature "switch";
-
 # OpenBSD included modules
 use Getopt::Std;
 use OpenBSD::Pledge;					# OpenBSD::Pledge(3p)
@@ -12,20 +10,44 @@ use Storable qw(lock_nstore lock_retrieve);		# Storable(3p)
 
 # from packages
 use boolean;		# p5-boolean
-#use Text::Table;	# p5-Text-Table
 
 #### possibly useful nuggets ####
 
 # %ENV - environment variables
+# $^O - string with name of Operating System
 
-#### needed variables ####
+#### Dependencies ####
+# see above "# from packages"
+# sqlite3
+# sqlports
+
+#### Variables ####
+
+my $no_write = 1;	# TODO: remove when ready to test storage; allow use by flag
 
 my $usage = "USAGE: TBD\n";
 my @game_table;
 my $mode;
 my @modes = ("run", "setup", "download", "engine", "detect_engine", "detect_game", "uninstall");
 
-#### files and directories ####
+# variables for columns in game_table
+my $id;			# unique string?
+my $name;
+my $version;
+my $location;		# location (base, ports, home)
+my $setup;		# fnaify, hashlink setup...
+my $binary;
+my $runtime;		# (filename to execute, steamworks-nosteam, other deps)
+my $installed;		# store location if installed?
+my $duration;		# time played so far
+my $last_played;
+my $user_rating;
+my $not_working;
+my $achievements;
+my $completed;
+my @gt_cols = qw(id name version location setup binary runtime installed duration last_played user_rating not_working achievements completed);
+
+#### Files and Directories ####
 
 # directories for playonbsd
 my $pobdir = $ENV{"HOME"} . "/.local/share/playonbsd";
@@ -36,12 +58,13 @@ my $game_table_file = $pobdir . "/game_table.nstorable";
 
 # configuration files
 my $game_engines_conf = $confdir . "/game_engines.conf";
+my $game_binaries_conf = $confdir . "/game_binaries.conf";
 
 #### Pledge and Unveil ####
 
 # ...
 
-#### functions, subroutines ####
+#### Functions, subroutines ####
 
 # bootstrap_game_table_file: build a new table of games with needed information
 sub bootstrap_game_table_file {
@@ -52,42 +75,13 @@ sub bootstrap_game_table_file {
 }
 
 # create_game_table: create a new game_table
-#	game ID (unique string?)
-# 	game name
-#	game version
-#	owned on GOG?
-#	owned on Steam?
-#	location (base, ports, home)
-#	setup (fnaify, hashlink setup...)
-#	runtime (filename to execute, steamworks-nosteam, other deps)
-#	installed (with location?)
-#	time played so far
-#	last played
-#	rating
-#	marked not working
-#	achievements
-#	completed?
 sub create_game_table {
-
-	my $id;
-	my $name;
-	my $version;
-	my $location;
-	my $setup;
-	my $binary;
-	my $runtime;
-	my $installed;
-	my $duration;
-	my $last_played;
-	my $user_rating;
-	my $not_working;
-	my $achievements;
-	my $completed;
 
 	# games in base install
 	my @base_games = `ls /usr/games/`;
 	foreach (@base_games) {
 		chomp;
+
 		$id = $_ . '-base';
 		$name = $_;
 		$version = "";
@@ -103,35 +97,53 @@ sub create_game_table {
 		$achievements = "";
 		$completed = false;
 
-		push @game_table, {
-			id		=> $id,
-			name		=> $name,
-			version		=> $version,
-			location	=> $location,
-			setup		=> $setup,
-			binary		=> $binary,
-			runtime		=> $runtime,
-			installed	=> $installed,
-			duration	=> $duration,
-			last_played	=> $last_played,
-			user_rating	=> $user_rating,
-			not_working	=> $not_working,
-			achievements	=> $achievements,
-			completed	=> $completed,
-		};
+		push_game_table_row();
 	}
 
 	# games in ports/packages
-	# ...
+
+	# can only run if sqlports is installed
+	unless (-e '/usr/local/share/sqlports') {
+		print "Unable to add ports to game_table because sqlports can't be found\n";
+	} else {
+		# get ports from category games from sqlports
+		my @ports_games_unsorted =
+			`sqlite3 /usr/local/share/sqlports "select pkgstem from ports where categories like '%games%';"`;
+		my @ports_games = sort @ports_games_unsorted;
+		undef @ports_games_unsorted;	# free unused variable
+		
+		# get list of installed packages
+		my @installed_packages = `pkg_info -mq`;
+		foreach (@ports_games) {
+			chomp;
+
+			$id = $_ . '-ports';
+			$name = $_;
+			$version = "";
+			$location = 'ports';
+			$setup = "";
+			$binary = '/usr/local/bin/' . $name;	# TODO: won't work for all, e.g. supertux2
+			$runtime = "";
+			if (grep /^$name/, @installed_packages) {
+				$installed = 1;
+			} else {
+				$installed = 0;
+			}
+			$duration = 0;
+			$last_played = undef;
+			$user_rating = undef;
+			$not_working = false;
+			$achievements = "";
+			$completed = false;
+
+			push_game_table_row();
+		}
+	}
 
 	# games per playonbsd.com
 	# ...
 
-	# games installed in base
-
-	# games installed from ports
-
-	# games installed, in playonbsd.com (in ~/games for example?)
+	# games installed, in playonbsd.com (in ~/games/playonbsd for example?)
 }
 
 sub download {
@@ -144,6 +156,33 @@ sub detect_game {
 }
 
 sub engine {
+}
+
+sub print_game_table {
+	print join "\t", @gt_cols;
+	foreach (@game_table) {
+		print join "\t", @$_{@gt_cols};
+	}
+	print scalar @game_table, "\n";
+}
+
+sub push_game_table_row {
+	push @game_table, {
+		id		=> $id,
+		name		=> $name,
+		version		=> $version,
+		location	=> $location,
+		setup		=> $setup,
+		binary		=> $binary,
+		runtime		=> $runtime,
+		installed	=> $installed,
+		duration	=> $duration,
+		last_played	=> $last_played,
+		user_rating	=> $user_rating,
+		not_working	=> $not_working,
+		achievements	=> $achievements,
+		completed	=> $completed,
+	};
 }
 
 # read_game_table_file: read game_table in from $game_table_file
@@ -178,10 +217,12 @@ sub run {
 	foreach(@game_table) {
 		if ($_->{name} eq $ARGV[1]) {
 			my $start_time = time();
-			system($_->{binary});
-			my $play_time = time() - $start_time;
-			print "time spent in game: ", $play_time, " seconds\n";
-			# TODO: save $play_time to database
+			my $ret = system($_->{binary});
+			unless ($ret) {
+				my $play_time = time() - $start_time;
+				print "time spent in game: ", $play_time, " seconds\n";
+				# TODO: save $play_time to database
+			}
 			last;
 		}
 	}
@@ -206,7 +247,9 @@ sub usage {
 
 sub write_game_table {
 	die "game_table not defined; can't write\n" unless @game_table;
-	lock_nstore \@game_table, $game_table_file || die "failed to obtain lock and store game_table to $game_table_file";
+	unless ($no_write) {
+		lock_nstore \@game_table, $game_table_file || die "failed to obtain lock and store game_table to $game_table_file";
+	}
 }
 
 #### process arguments ####
@@ -233,6 +276,11 @@ unless (-d $confdir or mkdir $confdir) {
 	die "Unable to create $confdir\n";
 }
 
+# read config files
+my %game_engine = readconf($game_engines_conf) if -e $game_engines_conf;
+my %game_binaries = readconf($game_binaries_conf) if -e $game_binaries_conf;
+
+# read or create (bootstrap) the game_table file
 if (-e $game_table_file) {
 	read_game_table_file();
 } else {
@@ -240,17 +288,12 @@ if (-e $game_table_file) {
 	bootstrap_game_table_file();
 }
 
-# read config files
-my %game_engine = readconf($game_engines_conf) if -e $game_engines_conf;
-
 # determine mode and run subroutine
 
-for ($mode) {
-	when (/^run/)		{ run(); }
-	when (/^setup/)		{ setup(); }
-	when (/^download/)	{ download(); }
-	when (/^engine/)	{ engine (); }
-	when (/^detect_engine/)	{ detect_engine(); }
-	when (/^detect_game/)	{ detect_game(); }
-	default			{ usage(); }
-}
+if	($mode eq 'run')		{ run(); }
+elsif	($mode eq 'setup')		{ setup(); }
+elsif	($mode eq 'download')		{ download(); }
+elsif	($mode eq 'engine')		{ engine (); }
+elsif	($mode eq 'detect_engine')	{ detect_engine(); }
+elsif	($mode eq 'detect_game')	{ detect_game(); }
+else					{ usage(); }
