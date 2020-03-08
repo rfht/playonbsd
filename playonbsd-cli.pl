@@ -6,8 +6,9 @@ use feature "switch";
 
 # OpenBSD included modules
 use Getopt::Std;
-use OpenBSD::Pledge;	# OpenBSD::Pledge(3p)
-use OpenBSD::Unveil;	# OpenBSD::Unveil(3p)
+use OpenBSD::Pledge;					# OpenBSD::Pledge(3p)
+use OpenBSD::Unveil;					# OpenBSD::Unveil(3p)
+use Storable qw(lock_nstore lock_retrieve);		# Storable(3p)
 
 # from packages
 use boolean;		# p5-boolean
@@ -20,76 +21,53 @@ use boolean;		# p5-boolean
 #### needed variables ####
 
 my $usage = "USAGE: TBD\n";
-
 my @game_table;
-
 my $mode;
+my @modes = ("run", "setup", "download", "engine", "detect_engine", "detect_game", "uninstall");
 
-my @modes = ("run", "setup", "download", "engine", "detect_engine", "detect_game");
+#### files and directories ####
+
+# directories for playonbsd
+my $pobdir = $ENV{"HOME"} . "/.local/share/playonbsd";
+my $confdir = $ENV{"HOME"} . "/.config/playonbsd";
+
+# game_table persisten storage
+my $game_table_file = $pobdir . "/game_table.nstorable";
+
+# configuration files
+my $game_engines_conf = $confdir . "/game_engines.conf";
 
 #### Pledge and Unveil ####
 
 # ...
 
 #### functions, subroutines ####
-my @modes = ("run", "setup", "download", "engine", "detect_engine", "detect_game");
 
-sub download {
+# bootstrap_game_table_file: build a new table of games with needed information
+sub bootstrap_game_table_file {
+	die "bootstrap_game_table_file() called with existing game_table_file\n" if -e $game_table_file;
+	die "bootstrap_game_table_file() called when game_table already defined\n" if @game_table;
+	create_game_table();
+	write_game_table();
 }
 
-sub detect_engine {
-}
-
-sub detect_game {
-}
-
-sub engine {
-}
-
-# readconf: read hashes from file and return hash
-sub readconf {
-	my $file = $_[0];
-	my %retval;
-
-	open(my $in, $file) or die "Can't open $file: $!";
-	while (<$in>)
-	{
-		chomp;
-		my ($key, $value) = split /=/;
-		next unless defined $value;
-		$retval{$key} = $value;
-	}
-	close $in or die "$in: $!";
-	
-	return %retval
-}
-
-sub run {
-	# exit with usage if no argument provided for playonbsd-cli run
-	usage() unless defined $ARGV[1];
-
-	# need an uptodate game_table
-	update_game_table();
-
-	# find the entry matching the game name
-	foreach(@game_table) {
-		if ($_->{name} eq $ARGV[1]) {
-			my $start_time = time();
-			system($_->{binary});
-			my $play_time = time() - $start_time;
-			print "time spent in game: ", $play_time, " seconds\n";
-			# TODO: save $play_time to database
-			last;
-		}
-	}
-	exit;
-}
-
-sub setup {
-}
-
-# update_game_table: update the database of games and their run info
-sub update_game_table {
+# create_game_table: create a new game_table
+#	game ID (unique string?)
+# 	game name
+#	game version
+#	owned on GOG?
+#	owned on Steam?
+#	location (base, ports, home)
+#	setup (fnaify, hashlink setup...)
+#	runtime (filename to execute, steamworks-nosteam, other deps)
+#	installed (with location?)
+#	time played so far
+#	last played
+#	rating
+#	marked not working
+#	achievements
+#	completed?
+sub create_game_table {
 
 	my $id;
 	my $name;
@@ -156,41 +134,80 @@ sub update_game_table {
 	# games installed, in playonbsd.com (in ~/games for example?)
 }
 
+sub download {
+}
+
+sub detect_engine {
+}
+
+sub detect_game {
+}
+
+sub engine {
+}
+
+# read_game_table_file: read game_table in from $game_table_file
+sub read_game_table_file {
+	die "game_table object not empty\n" if @game_table;
+	@game_table = lock_retrieve($game_table_file) || die "failed to obtain lock and read $game_table_file\n";
+}
+
+# readconf: read hashes from file and return hash
+sub readconf {
+	my $file = $_[0];
+	my %retval;
+
+	open(my $in, $file) or die "Can't open $file: $!";
+	while (<$in>)
+	{
+		chomp;
+		my ($key, $value) = split /=/;
+		next unless defined $value;
+		$retval{$key} = $value;
+	}
+	close $in or die "$in: $!";
+	
+	return %retval
+}
+
+sub run {
+	# exit with usage if no argument provided for playonbsd-cli run
+	usage() unless defined $ARGV[1];
+
+	# find the entry matching the game name
+	foreach(@game_table) {
+		if ($_->{name} eq $ARGV[1]) {
+			my $start_time = time();
+			system($_->{binary});
+			my $play_time = time() - $start_time;
+			print "time spent in game: ", $play_time, " seconds\n";
+			# TODO: save $play_time to database
+			last;
+		}
+	}
+	exit;
+}
+
+sub setup {
+}
+
+# update_game_table: update the database of games and their run info
+sub update_game_table {
+}
+
+sub uninstall {
+}
+
 # usage: show usage and exit
 sub usage {
 	print $usage;
 	exit;
 }
 
-# create_game_table: build the table of games with needed information
-#	game ID (unique string?)
-# 	game name
-#	game version
-#	owned on GOG?
-#	owned on Steam?
-#	location (base, ports, home)
-#	setup (fnaify, hashlink setup...)
-#	runtime (filename to execute, steamworks-nosteam, other deps)
-#	installed (with location?)
-#	time played so far
-#	last played
-#	rating
-#	marked not working
-#	achievements
-#	completed?
-sub create_game_table {
-	# clear anything from the table first
-	# ...
+sub write_game_table {
+	die "game_table not defined; can't write\n" unless @game_table;
+	lock_nstore \@game_table, $game_table_file || die "failed to obtain lock and store game_table to $game_table_file";
 }
-
-
-
-#### read variables from conf files ####
-
-my %game_engine = readconf("game_engines.conf");
-
-my @games = keys %game_engine;
-my @engines = values %game_engine;
 
 #### process arguments ####
 
@@ -206,7 +223,25 @@ $mode = $ARGV[0];
 
 usage() unless defined $mode;
 
-#### main ####
+#### MAIN ####
+
+# create directories if they don't exist yet
+unless (-d $pobdir or mkdir $pobdir) {
+	die "Unable to create $pobdir\n";
+}
+unless (-d $confdir or mkdir $confdir) {
+	die "Unable to create $confdir\n";
+}
+
+if (-e $game_table_file) {
+	read_game_table_file();
+} else {
+	# bootstrap game_table_file if it doesn't exist
+	bootstrap_game_table_file();
+}
+
+# read config files
+my %game_engine = readconf($game_engines_conf) if -e $game_engines_conf;
 
 # determine mode and run subroutine
 
