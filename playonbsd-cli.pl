@@ -20,6 +20,7 @@ use boolean;		# p5-boolean
 # see above "# from packages"
 # sqlite3
 # sqlports
+# pkg_info
 
 #### Variables ####
 
@@ -62,6 +63,7 @@ my $game_binaries_conf = $confdir . "/game_binaries.conf";
 
 #### Pledge and Unveil ####
 
+# if ($^O eq 'OpenBSD') ...
 # ...
 
 #### Functions, subroutines ####
@@ -122,7 +124,7 @@ sub create_game_table {
 			$version = "";
 			$location = 'ports';
 			$setup = "";
-			$binary = '/usr/local/bin/' . $name;	# TODO: won't work for all, e.g. supertux2
+			$binary = match_ports_binary($name);
 			$runtime = "";
 			if (grep /^$name/, @installed_packages) {
 				$installed = 1;
@@ -156,6 +158,11 @@ sub detect_game {
 }
 
 sub engine {
+}
+
+sub match_ports_binary {
+	shift;
+	return '/usr/local/bin/' . $_;
 }
 
 sub print_game_table {
