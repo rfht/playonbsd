@@ -4,20 +4,21 @@ use warnings;
 
 # OpenBSD included modules
 use File::Basename;					# File::Basename(3p)
-use Getopt::Std;					# Getopt::Std(3p)
-use Getopt::Long;					# Getopt::Long(3p)
+use Getopt::Long qw(:config bundling require_order auto_version auto_help);	# Getopt::Long(3p)
 use OpenBSD::Pledge;					# OpenBSD::Pledge(3p)
 use OpenBSD::Unveil;					# OpenBSD::Unveil(3p)
+use Pod::Usage;						# Pod::Usage(3p)
 use Storable qw(lock_nstore lock_retrieve);		# Storable(3p)
 
 # from packages
-use boolean;		# p5-boolean
+use boolean;		# p5-boolean	# TODO: is this really needed??
 
 #### possibly useful nuggets ####
 
 # %ENV - environment variables
 # $^O - string with name of Operating System
 # $0 - name of the perl script as called on command line
+# To stop Getopt::Long from processing further arguments, insert a double dash "--" on the command line.
 
 #### Dependencies ####
 # see above "# from packages"
@@ -27,11 +28,16 @@ use boolean;		# p5-boolean
 
 #### Variables ####
 
-my $no_write = 1;	# TODO: remove when ready to test storage; allow use by flag
+my $basename = basename($0);
 
-$Getopt::Std::STANDARD_HELP_VERSION = 1;
-my $pob_version = "pre-alpha";
-my $usage = "USAGE: TBD\n";
+$main::VERSION = "pre-alpha";	# used by Getopt::Long for auto_version
+
+# variables changed by command-line arguments
+my $help =		0;
+my $man =		0;
+my $no_write =		0;
+my $temp_table =	0;
+my $verbosity =		0;
 
 my @game_table;
 my $mode;
@@ -56,13 +62,11 @@ my @gt_cols = qw(id name version location setup binary runtime installed duratio
 
 #### Files and Directories ####
 
-my $basename = basename($0);
-
 # directories for playonbsd
 my $pobdir = $ENV{"HOME"} . "/.local/share/playonbsd";
 my $confdir = $ENV{"HOME"} . "/.config/playonbsd";
 
-# game_table persisten storage
+# game_table persistent storage
 my $game_table_file = $pobdir . "/game_table.nstorable";
 
 # configuration files
@@ -76,18 +80,9 @@ my $game_binaries_conf = $confdir . "/game_binaries.conf";
 
 #### Functions, subroutines ####
 
-sub HELP_MESSAGE {
-	print "\n";
-	usage();
-}
-
-sub VERSION_MESSAGE {
-	print "$basename $pob_version\n";
-}
-	
-
 # create_game_table: create a new game_table
 sub create_game_table {
+	print "creating game_table\n" if $verbosity > 0;
 
 	# games in base install
 	my @base_games = `ls /usr/games/`;
@@ -156,6 +151,8 @@ sub create_game_table {
 	# ...
 
 	# games installed, in playonbsd.com (in ~/games/playonbsd for example?)
+
+	print "finished creating game_table\n" if $verbosity > 0;
 }
 
 sub download {
@@ -170,14 +167,23 @@ sub detect_game {
 sub engine {
 }
 
-sub find_game_info {
+sub find_gamename_info {
 	# parameter: game name, column name
 	# potentially unsafe or not working if game name is ambiguous
 }
 
 sub find_gameid_info {
 	# parameters: game id, column name
-	# safer than find_game_info because there shouldn't be ambiguities
+	# safer than find_gamename_info because there shouldn't be ambiguities
+	my $gameid = $_[0];
+	my $colname = $_[1];
+	foreach (@game_table) {
+		if ($_->{'id'} eq $gameid) {
+			#print $_->{$colname}, "\n";
+			return $_->{$colname};
+			last;
+		}
+	}
 }
 
 # init: build a new table of games with needed information
@@ -245,9 +251,11 @@ sub readconf {
 }
 
 sub run {
-	# exit with usage if no argument provided for playonbsd-cli run
+	print "run, length of ARGV: ", scalar @ARGV, ", ARGV[0]: ", $ARGV[0], "\n" if $verbosity > 0;
+	# exit with pod2usage if no argument provided for playonbsd-cli run
+	shift @ARGV;
 	my $run_game = $ARGV[0];
-	usage() unless defined $run_game;
+	pod2usage() unless defined $run_game;
 
 	# find the entry matching the game name
 	foreach(@game_table) {
@@ -275,67 +283,81 @@ sub update_game_table {
 sub uninstall {
 }
 
-# usage: show usage and exit
-sub usage {
-	print $usage;
-	exit;
-}
-
 sub write_game_table {
-	die "game_table not defined; can't write\n" unless @game_table;
-	unless ($no_write) {
+	if ($no_write) {
+		warn "WARNING: writing disabled (no_write); skipping\n";
+		return;
+	} else {
+		die "game_table not defined; can't write\n" unless @game_table;
 		lock_nstore \@game_table, $game_table_file || die "failed to obtain lock and store game_table to $game_table_file";
 	}
 }
 
 sub _execute {
-	print "number of arguments: ", scalar @ARGV;
+	shift;
+	my $to_run = $ARGV[0];
+	print "_execute will run: $to_run\n";
 	print "\n";
-	print join " ", @ARGV;
+	# TODO: add input validation to prevent system() and other dangerous operations!
+	# call like this from the command line:
+	# playonbsd-cli.pl _execute "find_gameid_info('tetris-base', 'binary')"
+	#print find_gameid_info('tetris-base', 'binary');
+	eval "print $to_run";
 	print "\n";
-	exit;
-	eval $ARGV[1]
 }
 
-#### process arguments ####
+#### Process CLI Arguments ####
 
-my %options=();
-getopts("hv", \%options);
+GetOptions (	"help|h|?"	=> \$help,
+		"man"		=> \$man,
+		"no-write"	=> \$no_write,
+		"temp-table"	=> \$temp_table,
+		"verbose|v+"	=> \$verbosity)
+	or pod2usage(2);
 
-my $help = 1 if defined $options{h};
-my $verbose = 1 if defined $options{v};
+###### REMOVE THIS AFTER TESTING TO ALLOW WRITING ######
+$no_write = 1;
+$temp_table = 1;
+########################################################
 
-# is specified mode eligible?
-
-$mode = $ARGV[0];
-shift;				# shorten ARGV now that we have first argument in $mode
-usage() unless defined $mode;
-
+if ($help)		{ pod2usage(1) };
+if ($man)		{ pod2usage(-exitval => 0, -verbose => 2) };
+# $no_write doesn't need to be processed here
+if ($temp_table)	{ create_game_table() };
+# $verbosity doesn't need to be processed here
 
 #### MAIN ####
 
+$mode = $ARGV[0];
+shift;				# shorten ARGV now that we have first argument in $mode
+pod2usage() unless defined $mode;
+
 # create directories if they don't exist yet
-unless (-d $pobdir or mkdir $pobdir) {
-	die "Unable to create $pobdir\n";
-}
-unless (-d $confdir or mkdir $confdir) {
-	die "Unable to create $confdir\n";
+unless ($no_write) {
+	unless (-d $pobdir or mkdir $pobdir) {
+		die "Unable to create $pobdir\n";
+	}
+	unless (-d $confdir or mkdir $confdir) {
+		die "Unable to create $confdir\n";
+	}
 }
 
 # read config files
 my %game_engine = readconf($game_engines_conf) if -e $game_engines_conf;
 my %game_binaries = readconf($game_binaries_conf) if -e $game_binaries_conf;
 
-# read or create (bootstrap) the game_table file
-if (-e $game_table_file) {
-	read_game_table_file();
-} else {
-	warn "\nWARNING:\ngame_table_file not found. Initialize with '$basename init' or run with '--temp-table' to create a temporary table for the session.\n\n";
+# read the game_table file unless already initialized (--temp-table flag)
+unless (@game_table) {
+	if (-e $game_table_file) {
+		read_game_table_file();
+	} else {
+		warn "\nWARNING:\ngame_table_file not found. Initialize with '$basename init' or run with '--temp-table' to create a temporary table for the session.\n\n";
+	}
 }
 
 # determine mode and run subroutine
 
-print "Mode: ", $mode, "\n";
+print "Mode: $mode\n\n";
 
 # TODO: sort alphabetically
 if	($mode eq 'run')		{ run(); }
@@ -346,4 +368,42 @@ elsif	($mode eq 'detect_engine')	{ detect_engine(); }
 elsif	($mode eq 'detect_game')	{ detect_game(); }
 elsif	($mode eq 'init')		{ init(); }
 elsif	($mode eq '_execute')		{ _execute(); }
-else					{ usage(); }
+else					{ pod2usage(); }
+
+__END__
+
+=head1 NAME
+
+playonbsd-cli - manage games on OpenBSD
+
+=head1 SYNOPSIS
+
+playonbsd-cli [-hv] [-man] [MODE] [...]
+
+Modes:
+  help
+  init
+  install
+  run
+  setup
+  uninstall
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-h/--help>
+
+This message.
+
+=item B<-v/--version>
+
+Print version string.
+
+=back
+
+=head1 DESCRIPTION
+
+B<This program> provides several modes to set up and run games, and manage your game library.
+
+=cut
