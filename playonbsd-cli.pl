@@ -3,7 +3,9 @@ use strict;
 use warnings;
 
 # OpenBSD included modules
-use Getopt::Std;
+use File::Basename;					# File::Basename(3p)
+use Getopt::Std;					# Getopt::Std(3p)
+use Getopt::Long;					# Getopt::Long(3p)
 use OpenBSD::Pledge;					# OpenBSD::Pledge(3p)
 use OpenBSD::Unveil;					# OpenBSD::Unveil(3p)
 use Storable qw(lock_nstore lock_retrieve);		# Storable(3p)
@@ -15,6 +17,7 @@ use boolean;		# p5-boolean
 
 # %ENV - environment variables
 # $^O - string with name of Operating System
+# $0 - name of the perl script as called on command line
 
 #### Dependencies ####
 # see above "# from packages"
@@ -26,7 +29,10 @@ use boolean;		# p5-boolean
 
 my $no_write = 1;	# TODO: remove when ready to test storage; allow use by flag
 
+$Getopt::Std::STANDARD_HELP_VERSION = 1;
+my $pob_version = "pre-alpha";
 my $usage = "USAGE: TBD\n";
+
 my @game_table;
 my $mode;
 my @modes = ("run", "setup", "download", "engine", "detect_engine", "detect_game", "uninstall");
@@ -50,6 +56,8 @@ my @gt_cols = qw(id name version location setup binary runtime installed duratio
 
 #### Files and Directories ####
 
+my $basename = basename($0);
+
 # directories for playonbsd
 my $pobdir = $ENV{"HOME"} . "/.local/share/playonbsd";
 my $confdir = $ENV{"HOME"} . "/.config/playonbsd";
@@ -68,13 +76,15 @@ my $game_binaries_conf = $confdir . "/game_binaries.conf";
 
 #### Functions, subroutines ####
 
-# bootstrap_game_table_file: build a new table of games with needed information
-sub bootstrap_game_table_file {
-	die "bootstrap_game_table_file() called with existing game_table_file\n" if -e $game_table_file;
-	die "bootstrap_game_table_file() called when game_table already defined\n" if @game_table;
-	create_game_table();
-	write_game_table();
+sub HELP_MESSAGE {
+	print "\n";
+	usage();
 }
+
+sub VERSION_MESSAGE {
+	print "$basename $pob_version\n";
+}
+	
 
 # create_game_table: create a new game_table
 sub create_game_table {
@@ -160,6 +170,24 @@ sub detect_game {
 sub engine {
 }
 
+sub find_game_info {
+	# parameter: game name, column name
+	# potentially unsafe or not working if game name is ambiguous
+}
+
+sub find_gameid_info {
+	# parameters: game id, column name
+	# safer than find_game_info because there shouldn't be ambiguities
+}
+
+# init: build a new table of games with needed information
+sub init {
+	die "init() called with existing game_table_file\n" if -e $game_table_file;
+	die "init() called when game_table already defined\n" if @game_table;
+	create_game_table();
+	write_game_table();
+}
+
 sub match_ports_binary {
 	shift;
 	return '/usr/local/bin/' . $_;
@@ -218,11 +246,12 @@ sub readconf {
 
 sub run {
 	# exit with usage if no argument provided for playonbsd-cli run
-	usage() unless defined $ARGV[1];
+	my $run_game = $ARGV[0];
+	usage() unless defined $run_game;
 
 	# find the entry matching the game name
 	foreach(@game_table) {
-		if ($_->{name} eq $ARGV[1]) {
+		if ($_->{name} eq $run_game) {
 			my $start_time = time();
 			my $ret = system($_->{binary});
 			unless ($ret) {
@@ -259,6 +288,15 @@ sub write_game_table {
 	}
 }
 
+sub _execute {
+	print "number of arguments: ", scalar @ARGV;
+	print "\n";
+	print join " ", @ARGV;
+	print "\n";
+	exit;
+	eval $ARGV[1]
+}
+
 #### process arguments ####
 
 my %options=();
@@ -270,8 +308,9 @@ my $verbose = 1 if defined $options{v};
 # is specified mode eligible?
 
 $mode = $ARGV[0];
-
+shift;				# shorten ARGV now that we have first argument in $mode
 usage() unless defined $mode;
+
 
 #### MAIN ####
 
@@ -291,16 +330,20 @@ my %game_binaries = readconf($game_binaries_conf) if -e $game_binaries_conf;
 if (-e $game_table_file) {
 	read_game_table_file();
 } else {
-	# bootstrap game_table_file if it doesn't exist
-	bootstrap_game_table_file();
+	warn "\nWARNING:\ngame_table_file not found. Initialize with '$basename init' or run with '--temp-table' to create a temporary table for the session.\n\n";
 }
 
 # determine mode and run subroutine
 
+print "Mode: ", $mode, "\n";
+
+# TODO: sort alphabetically
 if	($mode eq 'run')		{ run(); }
 elsif	($mode eq 'setup')		{ setup(); }
 elsif	($mode eq 'download')		{ download(); }
 elsif	($mode eq 'engine')		{ engine (); }
 elsif	($mode eq 'detect_engine')	{ detect_engine(); }
 elsif	($mode eq 'detect_game')	{ detect_game(); }
+elsif	($mode eq 'init')		{ init(); }
+elsif	($mode eq '_execute')		{ _execute(); }
 else					{ usage(); }
