@@ -1,0 +1,35 @@
+=head1 NAME
+
+playonbsd-cli - manage games on OpenBSD
+
+=head1 SYNOPSIS
+
+playonbsd-cli [-hv] [-man] [MODE] [...]
+
+Modes:
+  help
+  init
+  install
+  run
+  setup
+  uninstall
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-h/--help>
+
+This message.
+
+=item B<-v/--version>
+
+Print version string.
+
+=back
+
+=head1 DESCRIPTION
+
+B<This program> provides several modes to set up and run games, and manage your game library.
+
+=cut
