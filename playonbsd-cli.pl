@@ -96,10 +96,10 @@ sub create_game_table {
 		$setup = "";
 		$binary = '/usr/games/' . $_;
 		$runtime = "";
-		$installed = true;
+		$installed = 1;
 		$duration = 0;
-		$last_played = undef;
-		$user_rating = undef;
+		$last_played = 0;
+		$user_rating = 0;
 		$not_working = false;
 		$achievements = "";
 		$completed = false;
@@ -116,8 +116,36 @@ sub create_game_table {
 		# get ports from category games from sqlports
 		my @ports_games_unsorted =
 			`sqlite3 /usr/local/share/sqlports "select pkgstem from ports where categories like '%games%';"`;
-		my @ports_games = sort @ports_games_unsorted;
-		undef @ports_games_unsorted;	# free unused variable
+
+		# remove duplicate entries in game_table (e.g. tome4)
+		my @ports_games_uniq = uniq(@ports_games_unsorted);
+		undef @ports_games_unsorted;
+
+		# TODO: read exclusion patterns from file
+		# Examples: tuxpaint-config, xonotic-server, vegastrike-music, vegastrike-extra,
+		#	uqm-voice, uqm-threedomusic, uqm-remix[1-4], tuxpaint-stamps,
+		#	depotdownloader, steamworks-nosteam, fnaify, sdl-jstest, mupen64plus-*,
+		#	gtetrinet-themes, gnome-twitch, freeciv-share, eboard-extras,
+		#	scummvm-tools
+		my @excl_patterns = ( "-data", "-server", "-music", "-config", "-extras?", "-voice",
+			"-threedomusic", "-content", "-remix[0-9]+", "-stamps", "^depotdownloader\$",
+			"steamworks-nosteam", "fnaify", "sdl-jstest", "mupen64plus-", "lwjgl",
+			"^lib(?!eralcrimesquad)", "hackdata", "-themes", "gnome-twitch", "-share",
+			"allegro", "-tools", "openttd-"
+		);
+
+		my @ports_games_filtered;
+		foreach my $pg (@ports_games_uniq) {
+			my $match = 0;
+			foreach my $ep (@excl_patterns) {
+				$match = 1 if $pg =~ /$ep/;
+			}
+			push @ports_games_filtered, $pg unless $match;
+		}
+		undef @ports_games_uniq;
+
+		my @ports_games = sort @ports_games_filtered;
+		undef @ports_games_filtered;	# free unused variable
 		
 		# get list of installed packages
 		my @installed_packages = `pkg_info -mq`;
@@ -129,7 +157,7 @@ sub create_game_table {
 			$version = "";
 			$location = 'ports';
 			$setup = "";
-			$binary = match_ports_binary($name);
+			$binary = find_binary_for_port($name);
 			$runtime = "";
 			if (grep /^$name/, @installed_packages) {
 				$installed = 1;
@@ -137,8 +165,8 @@ sub create_game_table {
 				$installed = 0;
 			}
 			$duration = 0;
-			$last_played = undef;
-			$user_rating = undef;
+			$last_played = 0;
+			$user_rating = 0;
 			$not_working = false;
 			$achievements = "";
 			$completed = false;
@@ -147,10 +175,12 @@ sub create_game_table {
 		}
 	}
 
+
 	# games per playonbsd.com
 	# ...
 
 	# games installed, in playonbsd.com (in ~/games/playonbsd for example?)
+
 
 	print "finished creating game_table\n" if $verbosity > 0;
 }
@@ -167,9 +197,66 @@ sub detect_game {
 sub engine {
 }
 
+sub find_binary_for_port {
+	my $port_name = $_[0];
+
+	my @local_binaries = `ls /usr/local/bin`;
+	# sanitize filenames
+	# TODO: openjkded is not what I'm looking for, but shows up. Should be for optional multiplayer
+	# TODO: don't pick up lincity-ng for lincity port; should be xlincity
+	# TODO: doesn't pick up corsix-th for corsixth port
+	my @false_pos = ( "open", "g", "gls", "ex", "dune", "an", "al", "vacuumdb", "sn",
+		"monodocs2slashdoc", "glib-genmarshal", "gtimeout", "firefox",
+		"backtrace_test" );
+	foreach my $my_bin (@local_binaries) {
+		$my_bin =~ tr/A-Za-z0-9._\-//cd;
+		undef $my_bin if grep( /^$my_bin$/, @false_pos);
+	}
+	@local_binaries = grep defined, @local_binaries;	# remove undefs from array
+	
+	# 1. is there a binary in /usr/local matching the port's name?
+	foreach my $bin (@local_binaries) {
+		if (grep( /^$port_name$/i, $bin )) {
+			my $retval = '/usr/local/bin/' . $bin;
+			return $retval;
+		}
+	}
+
+	# 2. binary that is part of the port's name? (e.g. arx, cataclysm (no_x11))
+	# TODO: refine this to be not as sensitive
+	# Some false positives: sn (snipe2d, snes9x), open (openxcom, opentyrian, openttd-*)
+	foreach my $bin (@local_binaries) {
+		return '/usr/local/bin/' . $bin if grep( /^$bin/i, $port_name);
+	}
+
+	# 3. binary that contains the port's name? (xonotic-sdl, supertux2)
+	foreach my $bin (@local_binaries) {
+		return '/usr/local/bin/' . $bin if grep( /^$port_name/i, $bin);
+	}
+
+	# 3.5 binary with significant overlap? (cataclysm-tiles for cataclysm-dda)
+
+	# 4. Text::LevenshteinXS qw(distance)
+
+	# 5. what if multiple results?
+
+	# 6. give up (return empty string)
+	# TODO: find better return value (empty string causes problems with print
+	return " ";
+}
+
 sub find_gamename_info {
 	# parameter: game name, column name
 	# potentially unsafe or not working if game name is ambiguous
+	my $gamename= $_[0];
+	my $colname = $_[1];
+	foreach (@game_table) {
+		if ($_->{'name'} eq $gamename) {
+			#print $_->{$colname}, "\n";
+			return $_->{$colname};
+			last;
+		}
+	}
 }
 
 sub find_gameid_info {
@@ -202,7 +289,8 @@ sub match_ports_binary {
 sub print_game_table {
 	print join "\t", @gt_cols;
 	foreach (@game_table) {
-		print join "\t", @$_{@gt_cols};
+		print join "|", @$_{@gt_cols};
+		print "\n";
 	}
 	print scalar @game_table, "\n";
 }
@@ -257,23 +345,23 @@ sub run {
 	my $run_game = $ARGV[0];
 	pod2usage() unless defined $run_game;
 
-	# find the entry matching the game name
-	foreach(@game_table) {
-		if ($_->{name} eq $run_game) {
-			my $start_time = time();
-			my $ret = system($_->{binary});
-			unless ($ret) {
-				my $play_time = time() - $start_time;
-				print "time spent in game: ", $play_time, " seconds\n";
-				# TODO: save $play_time to database
-			}
-			last;
-		}
+	my $binary = find_gamename_info($run_game, 'binary');
+	my $start_time = time();
+	my $ret = system($binary);
+	unless ($ret) {
+		my $play_time = time() - $start_time;
+		print "time spent in game: ", $play_time, " seconds\n";
+		# TODO: save $play_time to database
 	}
 	exit;
 }
 
 sub setup {
+}
+
+sub uniq {
+	my %seen;
+	grep !$seen{$_}++, @_;
 }
 
 # update_game_table: update the database of games and their run info
@@ -302,7 +390,7 @@ sub _execute {
 	# call like this from the command line:
 	# playonbsd-cli.pl _execute "find_gameid_info('tetris-base', 'binary')"
 	#print find_gameid_info('tetris-base', 'binary');
-	eval "print $to_run";
+	eval "print 'Return value: ', $to_run";
 	print "\n";
 }
 
