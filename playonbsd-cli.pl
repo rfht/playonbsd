@@ -362,6 +362,23 @@ sub run {
 	exit;
 }
 
+sub select_rows {
+	# parameter: column name, pattern
+	# example: to select only rows with empty binary column:
+	#	./playonbsd-cli.pl -v _execute "select_rows('binary', '^$')"
+	my $colname = $_[0];
+	my $pattern = $_[1];
+
+	print join "|", @gt_cols;
+	print "\n";
+	foreach (@game_table) {
+		if ($_->{$colname} =~ /$pattern/) {
+			print join "|", @$_{@gt_cols};
+			print "\n";
+		}
+	}
+}
+
 sub setup {
 }
 
