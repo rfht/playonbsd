@@ -126,12 +126,20 @@ sub create_game_table {
 		#	uqm-voice, uqm-threedomusic, uqm-remix[1-4], tuxpaint-stamps,
 		#	depotdownloader, steamworks-nosteam, fnaify, sdl-jstest, mupen64plus-*,
 		#	gtetrinet-themes, gnome-twitch, freeciv-share, eboard-extras,
-		#	scummvm-tools
-		my @excl_patterns = ( "-data", "-server", "-music", "-config", "-extras?", "-voice",
-			"-threedomusic", "-content", "-remix[0-9]+", "-stamps", "^depotdownloader\$",
-			"steamworks-nosteam", "fnaify", "sdl-jstest", "mupen64plus-", "lwjgl",
-			"^lib(?!eralcrimesquad)", "hackdata", "-themes", "gnome-twitch", "-share",
-			"allegro", "-tools", "openttd-"
+		#	scummvm-tools, amor (not a game), an (anagram generator),
+		#	chroma-enigma (is a level pack), cmatrix (not a game), cowsay
+		my @excl_patterns = ( "-data\$", "-server\$", "-music\$", "-config\$", "-extras?\$", "-voice\$",
+			"-threedomusic\$", "-content\$", "-remix[0-9]+\$", "-stamps\$", "^depotdownloader\$",
+			"^steamworks-nosteam\$", "^fnaify\$", "^sdl-jstest\$", "^mupen64plus-", "^lwjgl\$",
+			"^lib(?!eralcrimesquad)", "^hackdata\$", "-themes\$", "^gnome-twitch\$", "-share\$",
+			"^allegro\$", "-tools\$", "^openttd-", "^amor\$", "^an\$", "^asciiquarium\$",
+			"^chroma-enigma\$", "^cmatrix\$", "^x?cowsay\$", "^doomdata\$", "^duke3ddata\$",
+			"^fifengine\$", "^fifechan\$", "^fire\$", "^flatzebra\$", "^fragistics\$",
+			"^gti\$", "^hypatia\$", "^godot\$", "^insult\$", "^irrlicht\$", "^kturtle\$",
+			"^ktux\$", "^mnemosyne\$", "^mudix\$", "^mvdsv\$", "^newvox\$", "^npcomplete\$",
+			"^plib\$", "^py.*-game\$", "^pyganim\$", "^qqwing\$", "^qstat\$", "^rocs\$",
+			"^sl\$", "^speyes\$", "^tiled\$", "^uforadiant\$", "-speech\$", "^weland\$",
+			"^wtf\$", "^xgolgo\$", "^xlennart\$", "^xroach\$", "^xteddy\$"
 		);
 
 		my @ports_games_filtered;
@@ -158,6 +166,7 @@ sub create_game_table {
 			$location = 'ports';
 			$setup = "";
 			$binary = find_binary_for_port($name);
+			$binary = "" unless $binary;
 			$runtime = "";
 			if (grep /^$name/, @installed_packages) {
 				$installed = 1;
@@ -181,7 +190,8 @@ sub create_game_table {
 
 	# games installed, in playonbsd.com (in ~/games/playonbsd for example?)
 
-
+	# TODO: sort the table by game name
+	# NOT like this: @game_table = sort @game_table;
 	print "finished creating game_table\n" if $verbosity > 0;
 }
 
@@ -242,7 +252,7 @@ sub find_binary_for_port {
 
 	# 6. give up (return empty string)
 	# TODO: find better return value (empty string causes problems with print
-	return " ";
+	return;
 }
 
 sub find_gamename_info {
@@ -281,13 +291,9 @@ sub init {
 	write_game_table();
 }
 
-sub match_ports_binary {
-	shift;
-	return '/usr/local/bin/' . $_;
-}
-
 sub print_game_table {
-	print join "\t", @gt_cols;
+	print join "|", @gt_cols;
+	print "\n";
 	foreach (@game_table) {
 		print join "|", @$_{@gt_cols};
 		print "\n";
