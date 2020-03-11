@@ -11,7 +11,8 @@ use Pod::Usage;						# Pod::Usage(3p)
 use Storable qw(lock_nstore lock_retrieve);		# Storable(3p)
 
 # from packages
-use boolean;		# p5-boolean	# TODO: is this really needed??
+use boolean;				# p5-boolean	# TODO: is this really needed??
+use Text::LevenshteinXS qw(distance);	# Text::LevenshteinXS(3p)
 
 #### possibly useful nuggets ####
 
@@ -25,6 +26,7 @@ use boolean;		# p5-boolean	# TODO: is this really needed??
 # sqlite3
 # sqlports
 # pkg_info
+# uname -m
 
 #### Variables ####
 
@@ -42,6 +44,8 @@ my $verbosity =		0;
 my @game_table;
 my $mode;
 my @modes = ("run", "setup", "download", "engine", "detect_engine", "detect_game", "uninstall");
+my $max_Levenshtein =	6;	# max Levenshtein distance (how many edits) for matching a port with a binary
+my $arch = `uname -m`;
 
 # variables for columns in game_table
 my $id;			# unique string?
@@ -49,7 +53,7 @@ my $name;
 my $version;
 my $location;		# location (base, ports, home)
 my $setup;		# fnaify, hashlink setup...
-my $binary;
+#my @binaries;		# May need to be declared inside the sub instead
 my $runtime;		# (filename to execute, steamworks-nosteam, other deps)
 my $installed;		# store location if installed?
 my $duration;		# time played so far
@@ -58,7 +62,7 @@ my $user_rating;
 my $not_working;
 my $achievements;
 my $completed;
-my @gt_cols = qw(id name version location setup binary runtime installed duration last_played user_rating not_working achievements completed);
+my @gt_cols = qw(id name version location setup binaries runtime installed duration last_played user_rating not_working achievements completed);
 
 #### Files and Directories ####
 
@@ -86,6 +90,7 @@ sub create_game_table {
 
 	# games in base install
 	my @base_games = `ls /usr/games/`;
+	my @base_binaries = ();
 	foreach (@base_games) {
 		chomp;
 
@@ -94,7 +99,7 @@ sub create_game_table {
 		$version = "";
 		$location = 'base';
 		$setup = "";
-		$binary = '/usr/games/' . $_;
+		@base_binaries = ('/usr/games/' . $_);
 		$runtime = "";
 		$installed = 1;
 		$duration = 0;
@@ -104,7 +109,22 @@ sub create_game_table {
 		$achievements = "";
 		$completed = false;
 
-		push_game_table_row();
+		push @game_table, {
+			id		=> $id,
+			name		=> $name,
+			version		=> $version,
+			location	=> $location,
+			setup		=> $setup,
+			binaries	=> \@base_binaries,
+			runtime		=> $runtime,
+			installed	=> $installed,
+			duration	=> $duration,
+			last_played	=> $last_played,
+			user_rating	=> $user_rating,
+			not_working	=> $not_working,
+			achievements	=> $achievements,
+			completed	=> $completed,
+		};
 	}
 
 	# games in ports/packages
@@ -139,8 +159,16 @@ sub create_game_table {
 			"^ktux\$", "^mnemosyne\$", "^mudix\$", "^mvdsv\$", "^newvox\$", "^npcomplete\$",
 			"^plib\$", "^py.*-game\$", "^pyganim\$", "^qqwing\$", "^qstat\$", "^rocs\$",
 			"^sl\$", "^speyes\$", "^tiled\$", "^uforadiant\$", "-speech\$", "^weland\$",
-			"^wtf\$", "^xgolgo\$", "^xlennart\$", "^xroach\$", "^xteddy\$"
+			"^wtf\$", "^xgolgo\$", "^xlennart\$", "^xroach\$", "^xteddy\$", "^freedoom\$",
+			"^freedm\$"
 		);
+
+		# ports that are broken on user's arch
+		my @broken_ports = 
+			`sqlite3 /usr/local/share/sqlports "SELECT PkgStem FROM Ports INNER JOIN Broken ON Broken.PathId = Ports.PathId WHERE Arch IS NULL OR Arch = '$arch'"`;
+		foreach (@broken_ports) {
+			push @excl_patterns, "^" . $_ . "\$";
+		}
 
 		my @ports_games_filtered;
 		foreach my $pg (@ports_games_uniq) {
@@ -159,20 +187,22 @@ sub create_game_table {
 		my @installed_packages = `pkg_info -mq`;
 		foreach (@ports_games) {
 			chomp;
+			my @binaries = ();
 
-			$id = $_ . '-ports';
 			$name = $_;
-			$version = "";
-			$location = 'ports';
-			$setup = "";
-			$binary = find_binary_for_port($name);
-			$binary = "" unless $binary;
-			$runtime = "";
 			if (grep /^$name/, @installed_packages) {
 				$installed = 1;
 			} else {
 				$installed = 0;
 			}
+
+			$id = $_ . '-ports';
+			$version = "";
+			$location = 'ports';
+			$setup = "";
+			@binaries = find_binary_for_port($name);
+			$binaries[0] = "" unless $binaries[0] and $installed;
+			$runtime = "";
 			$duration = 0;
 			$last_played = 0;
 			$user_rating = 0;
@@ -180,10 +210,24 @@ sub create_game_table {
 			$achievements = "";
 			$completed = false;
 
-			push_game_table_row();
+			push @game_table, {
+				id		=> $id,
+				name		=> $name,
+				version		=> $version,
+				location	=> $location,
+				setup		=> $setup,
+				binaries	=> \@binaries,
+				runtime		=> $runtime,
+				installed	=> $installed,
+				duration	=> $duration,
+				last_played	=> $last_played,
+				user_rating	=> $user_rating,
+				not_working	=> $not_working,
+				achievements	=> $achievements,
+				completed	=> $completed,
+			};
 		}
 	}
-
 
 	# games per playonbsd.com
 	# ...
@@ -209,11 +253,11 @@ sub engine {
 
 sub find_binary_for_port {
 	my $port_name = $_[0];
+	my @bin_arr = ();
 
 	my @local_binaries = `ls /usr/local/bin`;
 	# sanitize filenames
 	# TODO: openjkded is not what I'm looking for, but shows up. Should be for optional multiplayer
-	# TODO: don't pick up lincity-ng for lincity port; should be xlincity
 	# TODO: doesn't pick up corsix-th for corsixth port
 	my @false_pos = ( "open", "g", "gls", "ex", "dune", "an", "al", "vacuumdb", "sn",
 		"monodocs2slashdoc", "glib-genmarshal", "gtimeout", "firefox",
@@ -224,35 +268,67 @@ sub find_binary_for_port {
 	}
 	@local_binaries = grep defined, @local_binaries;	# remove undefs from array
 	
-	# 1. is there a binary in /usr/local matching the port's name?
+	# 1. from stored table (game_binaries.conf)
+	# TODO:	use $game_binaries_conf; also put this outside of the loop
+	my %gb = readconf('game_binaries.conf');
+	foreach my $key (keys %gb) {
+		my @bin_array = split ',', $gb{$key};
+		s/^\s+// for @bin_array;
+		s/\s+$// for @bin_array;
+		foreach my $bin_array_element (@bin_array) {
+			$bin_array_element = '/usr/local/bin/' . $bin_array_element;
+		}
+		$gb{$key} = [ @bin_array ];
+	}
+
+	if (exists $gb{$port_name}[0]) {
+		@bin_arr = @{$gb{$port_name}};
+		return @bin_arr;
+	}
+
+
+	# 2. exact match
 	foreach my $bin (@local_binaries) {
-		if (grep( /^$port_name$/i, $bin )) {
-			my $retval = '/usr/local/bin/' . $bin;
-			return $retval;
+		if ($port_name eq $bin) {
+			$bin_arr[0] = '/usr/local/bin/' . $bin;
+			return @bin_arr;
+		}
+	}
+	# 3. case insensitive match (e.g. freedroidRPG, FreeSerf, GMastermind)
+	foreach my $bin (@local_binaries) {
+		if (lc $port_name eq lc $bin) {
+			$bin_arr[0] = '/usr/local/bin/' . $bin;
+			return @bin_arr;
+		}
+	}
+	# 4. binary that contains the port's name? (xonotic-sdl, supertux2)
+	foreach my $bin (@local_binaries) {
+		if (grep(/^$port_name/i, $bin)) {
+			$bin_arr[0] = '/usr/local/bin/' . $bin;
+			return @bin_arr;
+		}
+	}
+	# 5. binary that is part of the port's name? (e.g. arx, cataclysm (no_x11), quake2 (yquake2))
+	foreach my $bin (@local_binaries) {
+		if (grep( /^.?$bin/i, $port_name)) {
+			$bin_arr[0] = '/usr/local/bin/' . $bin;
+			return @bin_arr;
+		}
+	}
+	# 6. Text::LevenshteinXS qw(distance)
+	# TODO: pick best match, instead of first
+	foreach my $bin (@local_binaries) {
+		if (distance($port_name, $bin) < $max_Levenshtein) {
+			$bin_arr[0] = '/usr/local/bin/' . $bin;
+			return @bin_arr;
 		}
 	}
 
-	# 2. binary that is part of the port's name? (e.g. arx, cataclysm (no_x11))
-	# TODO: refine this to be not as sensitive
-	# Some false positives: sn (snipe2d, snes9x), open (openxcom, opentyrian, openttd-*)
-	foreach my $bin (@local_binaries) {
-		return '/usr/local/bin/' . $bin if grep( /^$bin/i, $port_name);
-	}
+	# what if multiple results?
 
-	# 3. binary that contains the port's name? (xonotic-sdl, supertux2)
-	foreach my $bin (@local_binaries) {
-		return '/usr/local/bin/' . $bin if grep( /^$port_name/i, $bin);
-	}
-
-	# 3.5 binary with significant overlap? (cataclysm-tiles for cataclysm-dda)
-
-	# 4. Text::LevenshteinXS qw(distance)
-
-	# 5. what if multiple results?
-
-	# 6. give up (return empty string)
-	# TODO: find better return value (empty string causes problems with print
-	return;
+	# give up (return empty string)
+	$bin_arr[0] = "";
+	return \@bin_arr;
 }
 
 sub find_gamename_info {
@@ -294,30 +370,23 @@ sub init {
 sub print_game_table {
 	print join "|", @gt_cols;
 	print "\n";
-	foreach (@game_table) {
-		print join "|", @$_{@gt_cols};
+	foreach my $row (@game_table) {
+		foreach my $element (@$row{@gt_cols}) {
+			if (ref($element) eq 'ARRAY') {
+				print join ", ", @$element;
+			} else {
+				print $element, "|";
+			}
+		}
 		print "\n";
+		#foreach my $element (@$row) {
+			#print $element, "|";
+		#}
+		#print "\n";
+		#print join "|", @$_{@gt_cols};
+		#print "\n";
 	}
 	print scalar @game_table, "\n";
-}
-
-sub push_game_table_row {
-	push @game_table, {
-		id		=> $id,
-		name		=> $name,
-		version		=> $version,
-		location	=> $location,
-		setup		=> $setup,
-		binary		=> $binary,
-		runtime		=> $runtime,
-		installed	=> $installed,
-		duration	=> $duration,
-		last_played	=> $last_played,
-		user_rating	=> $user_rating,
-		not_working	=> $not_working,
-		achievements	=> $achievements,
-		completed	=> $completed,
-	};
 }
 
 # read_game_table_file: read game_table in from $game_table_file
@@ -328,6 +397,7 @@ sub read_game_table_file {
 
 # readconf: read hashes from file and return hash
 sub readconf {
+	# parameters:	filename
 	my $file = $_[0];
 	my %retval;
 
@@ -337,6 +407,8 @@ sub readconf {
 		chomp;
 		my ($key, $value) = split /=/;
 		next unless defined $value;
+		$key =~ s/^\s+//;
+		$key =~ s/\s+$//;
 		$retval{$key} = $value;
 	}
 	close $in or die "$in: $!";
@@ -351,7 +423,7 @@ sub run {
 	my $run_game = $ARGV[0];
 	pod2usage() unless defined $run_game;
 
-	my $binary = find_gamename_info($run_game, 'binary');
+	my $binary = find_gamename_info($run_game, 'binaries');
 	my $start_time = time();
 	my $ret = system($binary);
 	unless ($ret) {
@@ -363,20 +435,24 @@ sub run {
 }
 
 sub select_rows {
-	# parameter: column name, pattern
-	# example: to select only rows with empty binary column:
-	#	./playonbsd-cli.pl -v _execute "select_rows('binary', '^$')"
+	# parameter:	column name, pattern
+	# return value:	number of matching rows
+	# example: to select only rows with empty binaries column:
+	#	./playonbsd-cli.pl -v _execute "select_rows('binaries', '^$')"
 	my $colname = $_[0];
 	my $pattern = $_[1];
+	my $matching_rows = 0;
 
 	print join "|", @gt_cols;
 	print "\n";
-	foreach (@game_table) {
-		if ($_->{$colname} =~ /$pattern/) {
-			print join "|", @$_{@gt_cols};
+	foreach my $tbl_row (@game_table) {
+		if ($tbl_row->{$colname} =~ /$pattern/) {
+			print join "|", @$tbl_row{@gt_cols};
 			print "\n";
+			$matching_rows++
 		}
 	}
+	return $matching_rows;
 }
 
 sub setup {
@@ -411,8 +487,8 @@ sub _execute {
 	print "\n";
 	# TODO: add input validation to prevent system() and other dangerous operations!
 	# call like this from the command line:
-	# playonbsd-cli.pl _execute "find_gameid_info('tetris-base', 'binary')"
-	#print find_gameid_info('tetris-base', 'binary');
+	# playonbsd-cli.pl _execute "find_gameid_info('tetris-base', 'binaries')"
+	#print find_gameid_info('tetris-base', 'binaries');
 	eval "print 'Return value: ', $to_run";
 	print "\n";
 }
@@ -455,7 +531,7 @@ unless ($no_write) {
 
 # read config files
 my %game_engine = readconf($game_engines_conf) if -e $game_engines_conf;
-my %game_binaries = readconf($game_binaries_conf) if -e $game_binaries_conf;
+#my %game_binaries = readconf($game_binaries_conf) if -e $game_binaries_conf;
 
 # read the game_table file unless already initialized (--temp-table flag)
 unless (@game_table) {
