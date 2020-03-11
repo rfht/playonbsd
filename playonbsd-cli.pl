@@ -44,7 +44,7 @@ my $verbosity =		0;
 my @game_table;
 my $mode;
 my @modes = ("run", "setup", "download", "engine", "detect_engine", "detect_game", "uninstall");
-my $max_Levenshtein =	6;	# max Levenshtein distance (how many edits) for matching a port with a binary
+#my $max_Levenshtein =	6;	# not needed?
 my $arch = `uname -m`;
 
 # variables for columns in game_table
@@ -160,7 +160,7 @@ sub create_game_table {
 			"^plib\$", "^py.*-game\$", "^pyganim\$", "^qqwing\$", "^qstat\$", "^rocs\$",
 			"^sl\$", "^speyes\$", "^tiled\$", "^uforadiant\$", "-speech\$", "^weland\$",
 			"^wtf\$", "^xgolgo\$", "^xlennart\$", "^xroach\$", "^xteddy\$", "^freedoom\$",
-			"^freedm\$"
+			"^freedm\$", "^polymorphable\$"
 		);
 
 		# ports that are broken on user's arch
@@ -201,7 +201,7 @@ sub create_game_table {
 			$location = 'ports';
 			$setup = "";
 			@binaries = find_binary_for_port($name);
-			$binaries[0] = "" unless $binaries[0] and $installed;
+			@binaries = () unless $binaries[0] and $installed;
 			$runtime = "";
 			$duration = 0;
 			$last_played = 0;
@@ -316,19 +316,18 @@ sub find_binary_for_port {
 		}
 	}
 	# 6. Text::LevenshteinXS qw(distance)
-	# TODO: pick best match, instead of first
-	foreach my $bin (@local_binaries) {
-		if (distance($port_name, $bin) < $max_Levenshtein) {
-			$bin_arr[0] = '/usr/local/bin/' . $bin;
-			return @bin_arr;
-		}
-	}
-
-	# what if multiple results?
-
-	# give up (return empty string)
-	$bin_arr[0] = "";
-	return \@bin_arr;
+	# https://www.perlmonks.org/?node_id=388423
+	my @binaries_Levensht = 
+		map { $_->[0] }
+		sort { $a->[1] <=> $b->[1] }
+		map { [ $_, distance($port_name, $_) ] } @local_binaries;
+	#print "binary 0: $binaries_Levensht[0]; last binary: $binaries_Levensht[-1]\n";
+	$bin_arr[0] = '/usr/local/bin/' . $binaries_Levensht[0];
+	# TODO: this will always return a binary. SET A THRESHOLD when an empty one should be returned
+	return @bin_arr;
+	
+	#$bin_arr[0] = "";
+	#return \@bin_arr;
 }
 
 sub find_gamename_info {
