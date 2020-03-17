@@ -15,11 +15,12 @@ use Pod::Usage;						# Pod::Usage(3p)
 use Storable qw(lock_nstore lock_retrieve);		# Storable(3p)
 
 # from packages
-use boolean;				# p5-boolean	# TODO: is this really needed??
+use boolean;					# p5-boolean	# TODO: is this really needed??
 # TODO: remove Data::Dumper if not needed later!
-use Data::Dumper;			# p5-Data-Dumper-Simple-0.11p0
-use LWP::Simple;			# p5-libwww	# !! needs p5-LWP-Protocol-https for https !!
-use Text::LevenshteinXS qw(distance);	# Text::LevenshteinXS(3p)
+use Data::Dumper;				# p5-Data-Dumper-Simple-0.11p0
+use LWP::Simple;				# p5-libwww	# !! needs p5-LWP-Protocol-https for https !!
+use Text::LevenshteinXS qw(distance);		# Text::LevenshteinXS(3p)
+use WWW::Form::UrlEncoded qw( build_urlencoded );	# p5-WWW-Form-UrlEncoded, also available as -XS
 
 #### possibly useful nuggets ####
 
@@ -36,6 +37,7 @@ use Text::LevenshteinXS qw(distance);	# Text::LevenshteinXS(3p)
 # uname -m
 # depotdownloader
 # p5-LWP-Protocol-https
+# xdg-utils			# for xdg-open(1)
 
 #### Variables ####
 
@@ -272,7 +274,6 @@ sub download {
 		or pod2usage(2);
 
 	$game_name = $ARGV[0];
-	print "$game_name\n";
 
 	# create $pobgamedir if doesn't exist
 	unless ($no_write) {
@@ -299,10 +300,25 @@ sub download_autodetect {
 }
 
 sub download_gog {
+	# 1. authenticate with browser (https://auth.gog.com/auth)
+	my %params = (
+		"client_id"	=> "46899977096215655",
+		"layout"	=> "client2",
+		"redirect_uri"	=> "https://embed.gog.com/on_login_success?origin=client",
+		"response_type"	=> "code",
+	);
+	my $auth_url = "https://auth.gog.com/auth?" . build_urlencoded('client_id', '46899977096215655', 'layout', 'client2', 'redirect_uri', 'https://embed.gog.com/on_login_success?origin=client', 'response_type', 'code');
+	
+	my $ret = system("xdg-open $auth_url");
+
+	# 2. redirect to https://www.gog.com/on_login_success with a login code appended
+
+	# 3. take the code via browser callbacks (?), use it to request a token
+
+	# 4. renew the token when it expires after about an hour
 }
 
 sub download_package {
-	print "$game_name\n";
 	my $pkg_command = "doas pkg_add " . $game_name;
 	print "Calling: $pkg_command\n";
 	my $ret = system("doas pkg_add $game_name");
