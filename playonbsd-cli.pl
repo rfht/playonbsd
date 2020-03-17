@@ -1,10 +1,12 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
+#use Encode;		# wide characters in Steam's AppList - encode/decode	# TODO: REALLY NEEDED?
 
 # OpenBSD included modules
 use File::Basename;					# File::Basename(3p)
 use Getopt::Long qw(:config bundling require_order auto_version auto_help);	# Getopt::Long(3p)
+use JSON::PP;						# JSON::PP(3p)
 use OpenBSD::Pledge;					# OpenBSD::Pledge(3p)
 use OpenBSD::Unveil;					# OpenBSD::Unveil(3p)
 use Pod::Usage;						# Pod::Usage(3p)
@@ -12,6 +14,9 @@ use Storable qw(lock_nstore lock_retrieve);		# Storable(3p)
 
 # from packages
 use boolean;				# p5-boolean	# TODO: is this really needed??
+# TODO: remove Data::Dumper if not needed later!
+use Data::Dumper;			# p5-Data-Dumper-Simple-0.11p0
+use LWP::Simple;			# p5-libwww	# !! needs p5-LWP-Protocol-https for https !!
 use Text::LevenshteinXS qw(distance);	# Text::LevenshteinXS(3p)
 
 #### possibly useful nuggets ####
@@ -27,6 +32,8 @@ use Text::LevenshteinXS qw(distance);	# Text::LevenshteinXS(3p)
 # sqlports
 # pkg_info
 # uname -m
+# depotdownloader
+# p5-LWP-Protocol-https
 
 #### Variables ####
 
@@ -44,7 +51,6 @@ my $verbosity =		0;
 my @game_table;
 my $mode;
 my @modes = ("run", "setup", "download", "engine", "detect_engine", "detect_game", "uninstall");
-#my $max_Levenshtein =	6;	# not needed?
 my $arch = `uname -m`;
 
 # variables for columns in game_table
@@ -67,15 +73,21 @@ my @gt_cols = qw(id name version location setup binaries runtime installed durat
 #### Files and Directories ####
 
 # directories for playonbsd
-my $pobdir = $ENV{"HOME"} . "/.local/share/playonbsd";
+my $pobgamedir = $ENV{"HOME"} . "/games/playonbsd";		# TODO: make this configurable
+my $pobdatadir = $ENV{"HOME"} . "/.local/share/playonbsd";
 my $confdir = $ENV{"HOME"} . "/.config/playonbsd";
 
 # game_table persistent storage
-my $game_table_file = $pobdir . "/game_table.nstorable";
+my $game_table_file = $pobdatadir . "/game_table.nstorable";
 
 # configuration files
 my $game_engines_conf = $confdir . "/game_engines.conf";
 my $game_binaries_conf = $confdir . "/game_binaries.conf";
+
+#### Steam Stuff ####
+
+my $steam_username;						# TODO: read this from a configuration
+my $steam_applist = $pobdatadir . "/steam_applist.json";
 
 #### Pledge and Unveil ####
 
@@ -240,6 +252,71 @@ sub create_game_table {
 }
 
 sub download {
+	my $source = "";
+	
+	GetOptions (	
+		"source|s=s"      => \$source
+		)
+		or pod2usage(2);
+
+	my $game_name = $ARGV[0];
+	my $game_dir = $pobgamedir . "/" . $game_name;
+	my $steam_appid;
+
+	if (lc $source eq lc "Steam") {
+		# TODO: provide a flag to force overwrite existing game dir
+		if (grep {/^$game_name$/i} `ls $pobgamedir`) {
+			die "ERROR: game directory already exists\n"
+		}
+		system("which depotdownloader >/dev/null 2>&1")
+			and die "ERROR: depotdownloader not found in PATH\n";
+
+		unless ($no_write) {
+			unless (-d $pobgamedir or mkdir $pobgamedir) {
+				die "ERROR: Unable to create $pobgamedir\n";
+			}
+		}
+
+		# TODO: make this a separate function, store it and only update it periodically
+		#	or update it only if game_name can't be found in the list
+		# get Steam AppID from game_name
+
+		my $all_steam_apps = get("https://api.steampowered.com/ISteamApps/GetAppList/v0002");
+		die "ERROR: Couldn't get Steam AppList\n" unless defined $all_steam_apps;
+
+		# TODO: use Unicode/UTF-8??
+		my $steam_json = decode_json $all_steam_apps;
+		#print Dumper $steam_json->{'applist'}->{'apps'};
+		#print keys %{ $steam_json->{'applist'}->{'apps'}[0] };
+		#print $steam_json->{'applist'}->{'apps'}[0]{'appid'};
+		foreach my $steam_app (@{ $steam_json->{'applist'}->{'apps'} }) {
+			#print scalar @{ $steam_app }, "\n";
+			#exit;
+			#print $steam_app->{'appid'} if lc $steam_app->{'name'} eq lc $game_name;
+			if (lc $steam_app->{'name'} eq lc $game_name) {
+				$steam_appid = $steam_app->{'appid'};
+				last;
+			}
+			#print $steam_app->{'name'}, "\n";
+			#last if lc $steam_app->{'name'} eq lc 'Northgard';
+		}
+		print "found AppId: $steam_appid\n" if $verbosity > 0;
+
+		print "Downloading from Steam with depotdownloader ...\n\n";
+		# TODO: needs a mechanism to download from Windows ('-os windows') for some games
+		# TODO: add a way to have password stored
+		my $ret = system("depotdownloader -dir $game_dir -app '$steam_appid' -username $steam_username")
+			unless $no_write;
+		print "return value: $ret\n";
+		
+		exit;
+	} elsif (lc $source eq lc "GOG") {
+		# ...
+	} elsif ($source eq "") {
+		# ...
+	} else {
+		die "ERROR: invalid argument for --source|-s\n";
+	}
 }
 
 sub detect_engine {
@@ -494,16 +571,17 @@ sub _execute {
 
 #### Process CLI Arguments ####
 
-GetOptions (	"help|h|?"	=> \$help,
-		"man"		=> \$man,
-		"no-write"	=> \$no_write,
-		"temp-table"	=> \$temp_table,
-		"verbose|v+"	=> \$verbosity)
+GetOptions (	"help|h|?"		=> \$help,
+		"man"			=> \$man,
+		"no-write"		=> \$no_write,
+		"steam-username=s"	=> \$steam_username,
+		"temp-table"		=> \$temp_table,
+		"verbose|v+"		=> \$verbosity)
 	or pod2usage(2);
 
 ###### REMOVE THIS AFTER TESTING TO ALLOW WRITING ######
-$no_write = 1;
-$temp_table = 1;
+#$no_write = 1;
+#$temp_table = 1;
 ########################################################
 
 if ($help)		{ pod2usage(1) };
@@ -520,8 +598,8 @@ pod2usage() unless defined $mode;
 
 # create directories if they don't exist yet
 unless ($no_write) {
-	unless (-d $pobdir or mkdir $pobdir) {
-		die "Unable to create $pobdir\n";
+	unless (-d $pobdatadir or mkdir $pobdatadir) {
+		die "Unable to create $pobdatadir\n";
 	}
 	unless (-d $confdir or mkdir $confdir) {
 		die "Unable to create $confdir\n";
