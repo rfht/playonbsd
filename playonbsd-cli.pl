@@ -1,10 +1,12 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-#use Encode;		# wide characters in Steam's AppList - encode/decode	# TODO: REALLY NEEDED?
+package PlayOnBSD::Main;
 
 # OpenBSD included modules
+#use Encode;		# wide characters in Steam's AppList - encode/decode	# TODO: REALLY NEEDED?
 use File::Basename;					# File::Basename(3p)
+use File::Path qw(remove_tree);				# File::Path(3p), needed for rmtree
 use Getopt::Long qw(:config bundling require_order auto_version auto_help);	# Getopt::Long(3p)
 use JSON::PP;						# JSON::PP(3p)
 use OpenBSD::Pledge;					# OpenBSD::Pledge(3p)
@@ -53,6 +55,12 @@ my $mode;
 my @modes = ("run", "setup", "download", "engine", "detect_engine", "detect_game", "uninstall");
 my $arch = `uname -m`;
 
+# Variables for download()
+my $download_os = 'linux';
+my $force_download;
+my $game_name;
+my $source = "";
+
 # variables for columns in game_table
 my $id;			# unique string?
 my $name;
@@ -93,6 +101,10 @@ my $steam_applist = $pobdatadir . "/steam_applist.json";
 
 # if ($^O eq 'OpenBSD') ...
 # ...
+
+#### Other Configuration ####
+
+binmode(STDOUT, ":utf8");					# so that output e.g. of steam applist is in Unicode
 
 #### Functions, subroutines ####
 
@@ -252,71 +264,117 @@ sub create_game_table {
 }
 
 sub download {
-	my $source = "";
-	
 	GetOptions (	
-		"source|s=s"      => \$source
+		"force|f"	=> \$force_download,
+		"os|o=s"	=> \$download_os,
+		"source|s=s"	=> \$source
 		)
 		or pod2usage(2);
 
-	my $game_name = $ARGV[0];
-	my $game_dir = $pobgamedir . "/" . $game_name;
-	my $steam_appid;
+	$game_name = $ARGV[0];
+	print "$game_name\n";
+
+	# create $pobgamedir if doesn't exist
+	unless ($no_write) {
+		unless (-d $pobgamedir or mkdir $pobgamedir) {
+			die "ERROR: Unable to create $pobgamedir\n";
+		}
+	}
 
 	if (lc $source eq lc "Steam") {
-		# TODO: provide a flag to force overwrite existing game dir
-		if (grep {/^$game_name$/i} `ls $pobgamedir`) {
-			die "ERROR: game directory already exists\n"
-		}
-		system("which depotdownloader >/dev/null 2>&1")
-			and die "ERROR: depotdownloader not found in PATH\n";
-
-		unless ($no_write) {
-			unless (-d $pobgamedir or mkdir $pobgamedir) {
-				die "ERROR: Unable to create $pobgamedir\n";
-			}
-		}
-
-		# TODO: make this a separate function, store it and only update it periodically
-		#	or update it only if game_name can't be found in the list
-		# get Steam AppID from game_name
-
-		my $all_steam_apps = get("https://api.steampowered.com/ISteamApps/GetAppList/v0002");
-		die "ERROR: Couldn't get Steam AppList\n" unless defined $all_steam_apps;
-
-		# TODO: use Unicode/UTF-8??
-		my $steam_json = decode_json $all_steam_apps;
-		#print Dumper $steam_json->{'applist'}->{'apps'};
-		#print keys %{ $steam_json->{'applist'}->{'apps'}[0] };
-		#print $steam_json->{'applist'}->{'apps'}[0]{'appid'};
-		foreach my $steam_app (@{ $steam_json->{'applist'}->{'apps'} }) {
-			#print scalar @{ $steam_app }, "\n";
-			#exit;
-			#print $steam_app->{'appid'} if lc $steam_app->{'name'} eq lc $game_name;
-			if (lc $steam_app->{'name'} eq lc $game_name) {
-				$steam_appid = $steam_app->{'appid'};
-				last;
-			}
-			#print $steam_app->{'name'}, "\n";
-			#last if lc $steam_app->{'name'} eq lc 'Northgard';
-		}
-		print "found AppId: $steam_appid\n" if $verbosity > 0;
-
-		print "Downloading from Steam with depotdownloader ...\n\n";
-		# TODO: needs a mechanism to download from Windows ('-os windows') for some games
-		# TODO: add a way to have password stored
-		my $ret = system("depotdownloader -dir $game_dir -app '$steam_appid' -username $steam_username")
-			unless $no_write;
-		print "return value: $ret\n";
-		
-		exit;
+		download_steam();
 	} elsif (lc $source eq lc "GOG") {
-		# ...
+		download_gog();
+	} elsif (lc $source eq lc "packages" or lc $source eq lc "package") {
+		download_package();
 	} elsif ($source eq "") {
-		# ...
+		download_autodetect();
 	} else {
 		die "ERROR: invalid argument for --source|-s\n";
 	}
+}
+
+sub download_autodetect {
+	# autodetect the source based on game_name
+}
+
+sub download_gog {
+}
+
+sub download_package {
+	print "$game_name\n";
+	my $pkg_command = "doas pkg_add " . $game_name;
+	print "Calling: $pkg_command\n";
+	my $ret = system("doas pkg_add $game_name");
+	if ($ret > 0) {
+		die "\nError downloading '$game_name' with pkg_add(1)\n";
+	}
+	# TODO: add option to run pkg_add with '-U'???
+	# TODO: add a way to obtain required assets for e.g. Barony
+}
+
+sub download_steam {
+	my $all_steam_apps;		# variable with the raw JSON of all Steam apps
+	my $game_dir = $pobgamedir . "/" . $game_name;
+	my $preexisting_gamedir;
+	my $steam_appid;
+
+	# check if the $game_dir already exists (case-insensitively) and if so,
+	#	put it in $preexisting_gamedir
+	foreach my $pobgame_subdir (`ls $pobgamedir`) {
+		chomp $pobgame_subdir;
+		$preexisting_gamedir = $pobgame_subdir if lc $game_name eq lc $pobgame_subdir;
+	}
+	if ($preexisting_gamedir) {
+		$preexisting_gamedir = $pobgamedir . "/" . $preexisting_gamedir;
+		die "ERROR: game directory already exists: $preexisting_gamedir\nRun '$basename download [--force|-f] $game_name' to delete and replace the game directory\n"
+			unless $force_download and not $no_write;
+		print "removing preexisting game dir: $preexisting_gamedir\n"
+			if $verbosity > 0;
+		remove_tree($preexisting_gamedir,
+			{ verbose => $verbosity > 0 }
+		);
+	}
+	# TODO: currently not relevant while it's called directly with mono below
+	system("which depotdownloader >/dev/null 2>&1")
+		and die "ERROR: depotdownloader not found in PATH\n";
+
+	# TODO: setup how/when to update steam_applist
+	if (-e $steam_applist) {
+		print "Reading Steam AppList from $steam_applist\n" if $verbosity > 0;
+		open(my $in, "<:encoding(UTF-8)", $steam_applist) or die "Can't open $steam_applist: $!";
+		$all_steam_apps = <$in>;
+		close $in or die "Error closing $in: $!";
+	} else {
+		# TODO: make this a separate function, store it and only update it periodically
+		#	or update it only if game_name can't be found in the list
+		$all_steam_apps = get("https://api.steampowered.com/ISteamApps/GetAppList/v0002");
+		die "ERROR: Couldn't get Steam AppList\n" unless defined $all_steam_apps;
+
+		# Store this in steam_applist.json
+		open my $filehandle, ">:encoding(UTF-8)", $steam_applist;
+		print $filehandle $all_steam_apps;
+		close $filehandle;
+	}
+
+	my $steam_json = decode_json $all_steam_apps;
+	foreach my $steam_app (@{ $steam_json->{'applist'}->{'apps'} }) {
+		print "_ ", lc $steam_app->{'name'}, " _ ", lc $game_name, " _\n";
+		if (lc $steam_app->{'name'} eq lc $game_name) {
+			$steam_appid = $steam_app->{'appid'};
+			last;
+		}
+	}
+	die "ERROR: Couldn't find AppId for '$game_name'\n" unless $steam_appid;
+	exit;
+	print "found AppId: $steam_appid\n" if $verbosity > 0;
+
+	print "Downloading from Steam with depotdownloader ...\n\n";
+	# TODO: add a way to have password stored
+	my $ret = system("MONO_PATH=/usr/local/share/depotdownloader mono /usr/local/share/depotdownloader/DepotDownloader.dll -dir '$game_dir' -app '$steam_appid' -username $steam_username -os '$download_os'")
+		unless $no_write;
+	print "\ndepotdownloader return value: $ret\n" if $verbosity > 0;
+	die "\nError while downloading from Steam\n" if $ret > 0;		# TODO: add removal of $game_dir if $ret > 0
 }
 
 sub detect_engine {
