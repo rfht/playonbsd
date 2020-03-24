@@ -375,14 +375,12 @@ sub download_steam {
 
 	my $steam_json = decode_json $all_steam_apps;
 	foreach my $steam_app (@{ $steam_json->{'applist'}->{'apps'} }) {
-		print "_ ", lc $steam_app->{'name'}, " _ ", lc $game_name, " _\n";
 		if (lc $steam_app->{'name'} eq lc $game_name) {
 			$steam_appid = $steam_app->{'appid'};
 			last;
 		}
 	}
 	die "ERROR: Couldn't find AppId for '$game_name'\n" unless $steam_appid;
-	exit;
 	print "found AppId: $steam_appid\n" if $verbosity > 0;
 
 	print "Downloading from Steam with depotdownloader ...\n\n";

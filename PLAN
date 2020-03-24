@@ -36,3 +36,5 @@ Priority in parentheses
 * sync library, settings between devices?
 * browser game support?
 * add benchmarks, benchmarking, and gaming-related system info, with option to upload performance data
+* add a way to add "recipes" for games from user submissions, maybe as structured textfile. Can convert data on existing games to this format
+* add tags for genre, multiplayer etc. Potentially source from Steam, pcgamingwiki etc.
