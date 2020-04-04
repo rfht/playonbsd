@@ -1,9 +1,11 @@
 #!/usr/bin/env perl
+
 use strict;
 use warnings;
 package PlayOnBSD::Main;
 
 # OpenBSD included modules
+
 #use Encode;		# wide characters in Steam's AppList - encode/decode	# TODO: REALLY NEEDED?
 use File::Basename;					# File::Basename(3p)
 use File::Path qw(remove_tree);				# File::Path(3p), needed for rmtree
@@ -15,7 +17,7 @@ use Pod::Usage;						# Pod::Usage(3p)
 use Storable qw(lock_nstore lock_retrieve);		# Storable(3p)
 
 # from packages
-use boolean;					# p5-boolean	# TODO: is this really needed??
+#use boolean;					# p5-boolean	# TODO: is this really needed??
 # TODO: remove Data::Dumper if not needed later!
 use Data::Dumper;				# p5-Data-Dumper-Simple-0.11p0
 use LWP::Simple;				# p5-libwww	# !! needs p5-LWP-Protocol-https for https !!
@@ -68,7 +70,7 @@ my $id;			# unique string?
 my $name;
 my $version;
 my $location;		# location (base, ports, home)
-my $setup;		# fnaify, hashlink setup...
+#my @setup;		# fnaify, hashlink setup... # May need to be declared inside the sub instead
 #my @binaries;		# May need to be declared inside the sub instead
 my $runtime;		# (filename to execute, steamworks-nosteam, other deps)
 my $installed;		# store location if installed?
@@ -76,7 +78,7 @@ my $duration;		# time played so far
 my $last_played;
 my $user_rating;
 my $not_working;
-my $achievements;
+#my @achievements;	# declare array inside the sub instead
 my $completed;
 my @gt_cols = qw(id name version location setup binaries runtime installed duration last_played user_rating not_working achievements completed);
 
@@ -99,6 +101,10 @@ my $game_binaries_conf = $confdir . "/game_binaries.conf";
 my $steam_username;						# TODO: read this from a configuration
 my $steam_applist = $pobdatadir . "/steam_applist.json";
 
+#### PlayOnBSD.com Stuff ####
+
+my $playonbsd_raw = $pobdatadir . "/playonbsd_raw.json";
+
 #### Pledge and Unveil ####
 
 # if ($^O eq 'OpenBSD') ...
@@ -114,7 +120,10 @@ binmode(STDOUT, ":utf8");					# so that output e.g. of steam applist is in Unico
 sub create_game_table {
 	print "creating game_table\n" if $verbosity > 0;
 
+	# #####################
 	# games in base install
+	# #####################
+
 	my @base_games = `ls /usr/games/`;
 	my @base_binaries = ();
 	foreach (@base_games) {
@@ -124,23 +133,23 @@ sub create_game_table {
 		$name = $_;
 		$version = "";
 		$location = 'base';
-		$setup = "";
+		my @setup = ();
 		@base_binaries = ('/usr/games/' . $_);
 		$runtime = "";
 		$installed = 1;
 		$duration = 0;
 		$last_played = 0;
 		$user_rating = 0;
-		$not_working = false;
-		$achievements = "";
-		$completed = false;
+		$not_working = 0;
+		my @achievements = ();
+		$completed = 0;
 
 		push @game_table, {
 			id		=> $id,
 			name		=> $name,
 			version		=> $version,
 			location	=> $location,
-			setup		=> $setup,
+			setup		=> \@setup,
 			binaries	=> \@base_binaries,
 			runtime		=> $runtime,
 			installed	=> $installed,
@@ -148,12 +157,14 @@ sub create_game_table {
 			last_played	=> $last_played,
 			user_rating	=> $user_rating,
 			not_working	=> $not_working,
-			achievements	=> $achievements,
+			achievements	=> \@achievements,
 			completed	=> $completed,
 		};
 	}
 
+	# #######################
 	# games in ports/packages
+	# #######################
 
 	# can only run if sqlports is installed
 	unless (-e '/usr/local/share/sqlports') {
@@ -225,23 +236,23 @@ sub create_game_table {
 			$id = $_ . '-ports';
 			$version = "";
 			$location = 'ports';
-			$setup = "";
+			my @setup = ();
 			@binaries = find_binary_for_port($name);
 			@binaries = () unless $binaries[0] and $installed;
 			$runtime = "";
 			$duration = 0;
 			$last_played = 0;
 			$user_rating = 0;
-			$not_working = false;
-			$achievements = "";
-			$completed = false;
+			$not_working = 0;
+			my @achievements = ();
+			$completed = 0;
 
 			push @game_table, {
 				id		=> $id,
 				name		=> $name,
 				version		=> $version,
 				location	=> $location,
-				setup		=> $setup,
+				setup		=> \@setup,
 				binaries	=> \@binaries,
 				runtime		=> $runtime,
 				installed	=> $installed,
@@ -249,16 +260,75 @@ sub create_game_table {
 				last_played	=> $last_played,
 				user_rating	=> $user_rating,
 				not_working	=> $not_working,
-				achievements	=> $achievements,
+				achievements	=> \@achievements,
 				completed	=> $completed,
 			};
 		}
 	}
 
+	# #######################
 	# games per playonbsd.com
-	# ...
+	# #######################
 
-	# games installed, in playonbsd.com (in ~/games/playonbsd for example?)
+	# Download shopping_guide.json if not present		# TODO: change name to playonbsd-games.json or similar
+	# TODO: set up criteria for updating the local copy
+
+	my $playonbsd_raw_json;
+	unless (-e $playonbsd_raw) {
+		$playonbsd_raw_json = get("https://playonbsd.com/raw/shopping_guide.json");	# TODO: replace with variable
+		die "ERROR: Couldn't get PlayOnBSD AppList\n" unless defined $playonbsd_raw_json;
+		# remove newlines
+		$playonbsd_raw_json =~ s/\s*\n\s*//g;	# remove leading, trailing whitespace
+		# Store this in playonbsd_raw.json
+		print "Downloading PlayOnBSD database\n" if $verbosity > 0;
+		open my $filehandle, ">:encoding(UTF-8)", $playonbsd_raw;
+		print $filehandle $playonbsd_raw_json;
+		close $filehandle;
+	} else {
+		print "Reading PlayOnBSD database from $playonbsd_raw\n" if $verbosity > 0;
+		open(my $in, "<:encoding(UTF-8)", $playonbsd_raw) or die "Can't open $playonbsd_raw: $!";
+		$playonbsd_raw_json = <$in>;
+		close $in or die "Error closing $in: $!";
+	}
+
+	my $playonbsd_json = decode_json $playonbsd_raw_json;
+	foreach my $playonbsd_game (@$playonbsd_json) {
+		print "$playonbsd_game->{'Game'}\n";
+		my @setup = ();
+		my @binaries = ();
+
+		$id = $playonbsd_game->{'Game'} . '-playonbsd';
+		$name = $playonbsd_game->{'Game'};
+		$version = "";
+		$location = 'playonbsd';
+		push @setup, $playonbsd_game->{'Port/Engine'};
+		@binaries = ();
+		$runtime = "";
+		$installed = 0;
+		$duration = 0;
+		$last_played = 0;
+		$user_rating = 0;
+		$not_working = 0;
+		my @achievements = ();
+		$completed = 0;
+
+		push @game_table, {
+			id		=> $id,
+			name		=> $name,
+			version		=> $version,
+			location	=> $location,
+			setup		=> \@setup,
+			binaries	=> \@binaries,
+			runtime		=> $runtime,
+			installed	=> $installed,
+			duration	=> $duration,
+			last_played	=> $last_played,
+			user_rating	=> $user_rating,
+			not_working	=> $not_working,
+			achievements	=> \@achievements,
+			completed	=> $completed,
+		};
+	}
 
 	# TODO: sort the table by game name
 	# NOT like this: @game_table = sort @game_table;
@@ -509,10 +579,12 @@ sub find_gameid_info {
 
 # init: build a new table of games with needed information
 sub init {
+	print "performing init\n" if $verbosity > 0;
 	die "init() called with existing game_table_file\n" if -e $game_table_file;
 	die "init() called when game_table already defined\n" if @game_table;
 	create_game_table();
 	write_game_table();
+	print "init completed\n" if $verbosity > 0;
 }
 
 sub print_game_table {
@@ -522,6 +594,7 @@ sub print_game_table {
 		foreach my $element (@$row{@gt_cols}) {
 			if (ref($element) eq 'ARRAY') {
 				print join ", ", @$element;
+				print "|";
 			} else {
 				print $element, "|";
 			}
@@ -604,6 +677,9 @@ sub select_rows {
 }
 
 sub setup {
+	# is the game installed?
+	
+	# assume the game is to be found in 
 }
 
 sub uniq {
