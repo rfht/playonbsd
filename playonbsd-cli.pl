@@ -293,7 +293,6 @@ sub create_game_table {
 
 	my $playonbsd_json = decode_json $playonbsd_raw_json;
 	foreach my $playonbsd_game (@$playonbsd_json) {
-		print "$playonbsd_game->{'Game'}\n";
 		my @setup = ();
 		my @binaries = ();
 
@@ -655,11 +654,36 @@ sub run {
 	exit;
 }
 
+sub select_field {
+	# returns value from a specific field in the game table
+	#
+	# parameters:	patter column name, pattern, return column name
+	# return value:	the value in return column name; empty string if not found
+	#
+	# example: to select only rows with empty binaries column:
+	#	./playonbsd-cli.pl -v _execute "select_field('name', '^Timespinner$', 'setup')"
+	#
+	my $pattern_colname = $_[0];
+	my $pattern = $_[1];
+	my $ret_colname = $_[2];
+
+	foreach my $tbl_row (@game_table) {
+		if ($tbl_row->{$pattern_colname} =~ /$pattern/) {
+			return $tbl_row->{$ret_colname};
+		}
+	}
+	return "";
+}
+
 sub select_rows {
-	# parameter:	column name, pattern
+	# prints rows from the game table, selected by pattern in a column
+	#
+	# parameters:	column name, pattern
 	# return value:	number of matching rows
+	#
 	# example: to select only rows with empty binaries column:
 	#	./playonbsd-cli.pl -v _execute "select_rows('binaries', '^$')"
+	#
 	my $colname = $_[0];
 	my $pattern = $_[1];
 	my $matching_rows = 0;
@@ -676,10 +700,79 @@ sub select_rows {
 	return $matching_rows;
 }
 
+sub select_column {
+	# returns all values of a column from the game table that match pattern
+	#
+	# parameters:	column name, pattern
+	# return value:	array of values in the column
+	#
+	# example: to select only rows with empty binaries column:
+	#	./playonbsd-cli.pl -v _execute "select_column('binaries', '.')"
+	#
+	my $colname = $_[0];
+	my $pattern = $_[1];
+	my @ret = ();
+
+	foreach my $tbl_row (@game_table) {
+		if ($tbl_row->{$colname} =~ /$pattern/) {
+			push @ret, $tbl_row->{$colname};
+		}
+	}
+	return @ret;
+}
+
 sub setup {
-	# is the game installed?
-	
-	# assume the game is to be found in 
+	my $game = $ARGV[0];
+	$game = "^" . $game . "\$";	# add beginning and end markers for the regex pattern
+
+	# is this a game that needs setup? (generally a PlayOnBSD game, not base or packages)
+	# TODO: currently, parentheses in the game name have to be escaped: Baldur's Gate  \(The Original Saga\)
+	my $setup_array = select_field('name', $game, 'setup') || die "game $game not found in database\n";
+	print "found @$setup_array[0] for setup of $game\n" if $verbosity > 0;
+
+	# TODO: is the game installed?
+	# assume the game is to be found in $pobgamedir
+
+	# TODO: check if the game is in an quirks list
+
+	my @name_list = select_column('name', '.');
+	# TODO: make sure that array position 0 is always the relevant one here
+	if	(@$setup_array[0] eq 'AGS')		{ die "AGS setup not implemented yet\n"; }
+	elsif	(@$setup_array[0] =~ /HTML5/i)		{ die "HTML5 setup not implemented yet\n"; }
+	elsif	(@$setup_array[0] eq 'HumblePlay')	{ die "HumblePlay setup not implemented yet\n"; }
+	elsif	(@$setup_array[0] eq 'dosbox')		{ die "DosBox setup not implemented yet\n"; }
+	elsif	(@$setup_array[0] eq 'fnaify')		{ setup_fnaify(); }
+	elsif	(@$setup_array[0] eq 'hashlink')		{ setup_hashlink(); }
+	elsif	(@$setup_array[0] eq 'libgdx')		{ setup_libgdx(); }
+	elsif	(@$setup_array[0] eq 'lwjgl')		{ setup_lwjgl(); }
+	elsif	(@$setup_array[0] =~ /minecraft/i)	{ die "Minecraft setup not implemented yet\n"; }
+	elsif	(@$setup_array[0] =~ /ren.?py/i)		{ die "Ren'Py setup not implemented yet\n"; }
+	elsif	(@$setup_array[0] eq 'romextract')	{ die "romextract setup not implemented yet\n"; }
+	# TODO: corsix-th not found because port is named corsixth
+	elsif	(grep( /^@$setup_array[0]$/i, @name_list))	{ die "@$setup_array[0] exists in the list of games; this is not implemented yet\n"; }
+	else						{ pod2usage(); }
+}
+
+sub setup_fnaify() {
+	print "in sub ", (caller(0))[3], ", rest not implemented yet\n";
+}
+
+sub setup_hashlink() {
+	print "in sub ", (caller(0))[3], "\n" if $verbosity > 0;
+	my $game_dir = $pobgamedir . "/" . lc $ARGV[0];		# TODO: return to previous working directory again?
+	chdir $game_dir;
+	print "deleting *.hdll, *.so, and *.so.* in $game_dir\n" if $verbosity > 0;
+	unlink glob "*.hdll";
+	unlink glob "*.so";
+	unlink glob "*.so.*";
+}
+
+sub setup_libgdx() {
+	print "in sub ", (caller(0))[3], ", rest not implemented yet\n";
+}
+
+sub setup_lwjgl() {
+	print "in sub ", (caller(0))[3], ", rest not implemented yet\n";
 }
 
 sub uniq {
