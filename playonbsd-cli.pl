@@ -21,6 +21,7 @@ use Storable qw(lock_nstore lock_retrieve);		# Storable(3p)
 # TODO: remove Data::Dumper if not needed later!
 use Data::Dumper;				# p5-Data-Dumper-Simple-0.11p0
 use LWP::Simple;				# p5-libwww	# !! needs p5-LWP-Protocol-https for https !!
+#use String::Approx 'amatch';			# p5-String-Approx	# not needed?
 use Text::LevenshteinXS qw(distance);		# Text::LevenshteinXS(3p)
 use WWW::Form::UrlEncoded qw( build_urlencoded );	# p5-WWW-Form-UrlEncoded, also available as -XS
 
@@ -38,6 +39,7 @@ use WWW::Form::UrlEncoded qw( build_urlencoded );	# p5-WWW-Form-UrlEncoded, also
 # pkg_info
 # uname -m
 # depotdownloader
+# py3-gogrepo
 # p5-LWP-Protocol-https
 # xdg-utils			# for xdg-open(1)
 
@@ -100,6 +102,10 @@ my $game_binaries_conf = $confdir . "/game_binaries.conf";
 
 my $steam_username;						# TODO: read this from a configuration
 my $steam_applist = $pobdatadir . "/steam_applist.json";
+
+#### GOG stuff ####
+
+my $gogrepodir = $pobdatadir;
 
 #### PlayOnBSD.com Stuff ####
 
@@ -300,7 +306,7 @@ sub create_game_table {
 		$name = $playonbsd_game->{'Game'};
 		$version = "";
 		$location = 'playonbsd';
-		push @setup, $playonbsd_game->{'Port/Engine'};
+		push @setup, $playonbsd_game->{'Setup'};
 		@binaries = ();
 		$runtime = "";
 		$installed = 0;
@@ -342,7 +348,7 @@ sub download {
 		)
 		or pod2usage(2);
 
-	$game_name = $ARGV[0];
+	$game_name = $ARGV[0];		# TODO: is this variable really needed here?
 
 	# create $pobgamedir if doesn't exist
 	unless ($no_write) {
@@ -369,22 +375,85 @@ sub download_autodetect {
 }
 
 sub download_gog {
-	# 1. authenticate with browser (https://auth.gog.com/auth)
-	my %params = (
-		"client_id"	=> "46899977096215655",
-		"layout"	=> "client2",
-		"redirect_uri"	=> "https://embed.gog.com/on_login_success?origin=client",
-		"response_type"	=> "code",
-	);
-	my $auth_url = "https://auth.gog.com/auth?" . build_urlencoded('client_id', '46899977096215655', 'layout', 'client2', 'redirect_uri', 'https://embed.gog.com/on_login_success?origin=client', 'response_type', 'code');
+	my $gog_game =		$ARGV[0];
+	my $gog_download_os =	'linux';
+	my $gog_lang =		'en';
+
+	# is py3-gogrepo available?
+	system("which py3-gogrepo >/dev/null 2>&1")
+		and die "ERROR: py3-gogrepo not found in PATH\n";
+
+	# go to directory for gogrepo and check that gog-cookies.dat and gog-manifest.dat exist
+	chdir $gogrepodir;
+	unless (-e 'gog-cookies.dat' and -e 'gog-manifest.dat') {
+		die "ERROR: gog-cookies.dat and/or gog-manifest.dat not found in $gogrepodir. Run 'py3-gogrepo login' and 'py3-gogrepo update' in $gogrepodir\n";
+	}
+
+	# Convert the game name into a regex
+	# TODO: Barony may need a tweak since title is still barony_cursed_edition
+	# TODO: Doom 2 may need a tweak; title is doom_ii_master_levels_game
+	# 	the_elder_scrolls_iii_morrowind_goty_edition_game
+	#	Ion Fury -> ion_maiden_game
+	#	Jazz Jackrabbit -> jazz_jackrabbit_collection
+	#	Quake -> quake_the_offering_game
+	#	Quake 2 -> quake_ii_quad_damage_game
+	#	Quake 3 -> quake_iii_arena_and_team_arena
+	#	system_shock_classic
+	#	tanglewoodr
+	my $game_regex = $gog_game;
+	$game_regex =~ s/[^a-zA-Z0-9]/.?/g;
+	my $gog_titles = `egrep -i \\'title\\'.*$game_regex gog-manifest.dat`;
+	die "ERROR: couldn't find matching title in gog-manifest.dat. Do you need to update py3-gogrepo?\n" unless $gog_titles;
+	# first try strictest matching, then relax it gradually
+	# TODO: add selection from $gog_titles by Levenshtein distance
+	$gog_titles =~ /\'($game_regex)\'/i;
+	my $match = $1;
+	unless ($match) {
+		$gog_titles =~ /\'($game_regex[^\']*)/i;
+		$match = $1;
+	}
+	unless ($match) {
+		$gog_titles =~ /[^\']*($game_regex[^\']*)/i;
+		$match = $1;
+	}
+	die "ERROR: couldn't find matching title in gog-manifest.dat. Do you need to update py3-gogrepo?\n" unless $match;
+	print "Found GOG id match: $match\n";
 	
-	my $ret = system("xdg-open $auth_url");
+	# TODO: check if game is already installed, if so, error out
+	# update entry in gog-manifest.dat for the $gog_download_os
+	print "\nUpdating gog-manifest.dat for $gog_game\n";
+	system("py3-gogrepo update -id $match -os $gog_download_os -lang $gog_lang") and die "\nError updating gog-manifest.dat for $gog_game\n";
 
-	# 2. redirect to https://www.gog.com/on_login_success with a login code appended
+	print "\nDownloading $gog_game from GOG with py3-gogrepo\n" if $verbosity > 0;
+	# TODO: add switch to allow not skipping extras
+	# TODO: some game content has to come from extras (Tanglewood, Broken Sword 1/2)
+	system("py3-gogrepo download -id $match -skipextras $pobgamedir") and die "\nError downloading '$gog_game' with py3-gogrepo\n";
 
-	# 3. take the code via browser callbacks (?), use it to request a token
+	my $gog_game_dir = $pobgamedir . "/" . $match;
+	# identify the archive file
+	chdir $gog_game_dir;
+	my $gog_download_files = `ls -1`;
+	my @gog_files_arr = split(/\n/, $gog_download_files);
+	my @gog_sh_files = grep { /.sh$/ } @gog_files_arr;
 
-	# 4. renew the token when it expires after about an hour
+	# extract the file and discard the archive
+	if (scalar @gog_sh_files > 1) {
+		die "\nERROR: more than 1 .sh file found. This is not implemented yet.\n";
+	} elsif (scalar @gog_sh_files == 1) {
+		print "\nExtracting $gog_sh_files[0]\n";
+		system("unzip $gog_sh_files[0]");
+		unlink $gog_sh_files[0] or warn "WARNING: Could not unlink $gog_sh_files[0]: $!";
+		# move files from data/noarch/game into main game directory
+		system("mv data/noarch/game/* .") and die "\nERROR while attempting to move files from data/noarch/game\n";
+		foreach my $dir ('data', 'meta', 'scripts') {
+			remove_tree($dir,
+				{ verbose => $verbosity > 0 }
+			);
+		}
+	} else {
+		# TODO: look for .exe files then, probably is a windows download
+		die "\nERROR: no .sh file found, .exe not implemented yet\n";
+	}
 }
 
 sub download_package {
