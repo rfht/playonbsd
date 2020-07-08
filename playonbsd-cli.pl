@@ -718,6 +718,10 @@ sub run {
 	pod2usage() unless defined $run_game;
 
 	my $binary = find_gamename_info($run_game, 'binaries');
+
+	# TODO: check if $binary is empty
+	# TODO: check if setup has been completed (.pob_setup_done present)
+
 	my $start_time = time();
 	my $ret = system($binary);
 	unless ($ret) {
@@ -823,9 +827,10 @@ sub setup {
 	my $setupdir = $pobgamedir . '/' . $setupdir[0];
 	print "found game directory: $setupdir\n" if $verbosity > 0;
 
+	# TODO: if it dies here, may need to ensure the binaries entry in game table is correct
 	die "ERROR: setup already completed in $setupdir\n" if (-e $setupdir . '/' . '.pob_setup_done');
 
-	# TODO: check if the game is in an quirks list
+	# TODO: check if the game is in a quirks list
 
 	my @name_list = select_column('name', '.');
 	# TODO: make sure that array position 0 is always the relevant one here
@@ -843,6 +848,14 @@ sub setup {
 	# TODO: corsix-th not found because port is named corsixth
 	elsif	(grep( /^@$setup_array[0]$/i, @name_list))	{ die "@$setup_array[0] exists in the list of games; this is not implemented yet\n"; }
 	else						{ pod2usage(); }
+
+	# create .pob_setup_done empty file as a cookie that setup completed
+	open(my $fh, ">>", $setupdir . "/.pob_setup_done")
+		or die "ERROR: unable to create .pob_setup_done\n";
+	close($fh);
+
+	# TODO: add binaries entry for the game ('fnaify' only present in launch script):
+	#	$setupdir . '/' . system("fgrep -l fnaify *");
 }
 
 sub setup_fnaify() {
@@ -856,10 +869,6 @@ sub setup_fnaify() {
 	print getcwd();
 	system("fnaify -y")
 		and die "ERROR while executing fnaify: $?";
-	# TODO: register somewhere that setup has been completed
-	open(my $fh, ">>", ".pob_setup_done")
-		or die "ERROR: unable to create .pob_setup_done\n";
-	close($fh);
 	chdir($lastwd);
 }
 
