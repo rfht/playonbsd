@@ -132,16 +132,16 @@ sub create_game_table {
 	# #####################
 
 	my @base_games = `ls /usr/games/`;
-	my @base_binaries = ();
 	foreach (@base_games) {
 		chomp;
+		my @base_binaries = ();
 
 		$id = $_ . '-base';
 		$name = $_;
 		$version = "";
 		$location = 'base';
 		my @setup = ();
-		@base_binaries = ('/usr/games/' . $_);
+		@base_binaries = ('/usr/games/' . $name);
 		$runtime = "";
 		$installed = 1;
 		$duration = 0;
@@ -648,6 +648,7 @@ sub find_gameid_info {
 
 # init: build a new table of games with needed information
 sub init {
+	# TODO: add flag to force creation and overwrite existing table
 	print "performing init\n" if $verbosity > 0;
 	die "init() called with existing game_table_file\n" if -e $game_table_file;
 	die "init() called when game_table already defined\n" if @game_table;
@@ -855,6 +856,7 @@ sub update_game_table {
 }
 
 sub uninstall {
+	print "in sub ", (caller(0))[3], ", rest not implemented yet\n";
 }
 
 sub write_game_table {
@@ -892,7 +894,7 @@ GetOptions (	"help|h|?"		=> \$help,
 
 ###### REMOVE THIS AFTER TESTING TO ALLOW WRITING ######
 $no_write = 1;
-$temp_table = 1;
+#$temp_table = 1;
 ########################################################
 
 if ($help)		{ pod2usage(1) };
@@ -919,7 +921,7 @@ unless ($no_write) {
 
 # read config files
 my %game_engine = readconf($game_engines_conf) if -e $game_engines_conf;
-#my %game_binaries = readconf($game_binaries_conf) if -e $game_binaries_conf;
+my %game_binaries = readconf($game_binaries_conf) if -e $game_binaries_conf;
 
 # read the game_table file unless already initialized (--temp-table flag)
 unless (@game_table) {
