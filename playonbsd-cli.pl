@@ -760,10 +760,15 @@ sub select_field {
 	my $pattern_colname = $_[0];
 	my $pattern = $_[1];
 	my $ret_colname = $_[2];
+	my $ret;
 
 	foreach my $tbl_row (@game_table) {
 		if ($tbl_row->{$pattern_colname} =~ /$pattern/) {
-			return $tbl_row->{$ret_colname};
+			$ret = $tbl_row->{$ret_colname};
+			if (ref($ret) eq 'ARRAY') {
+				$ret = join ", ", @$ret;
+			}
+			return $ret;
 		}
 	}
 	return "";
@@ -786,7 +791,15 @@ sub select_rows {
 	print "\n";
 	foreach my $tbl_row (@game_table) {
 		if ($tbl_row->{$colname} =~ /$pattern/) {
-			print join "|", @$tbl_row{@gt_cols};
+			foreach my $element (@$tbl_row{@gt_cols}) {
+				if (ref($element) eq 'ARRAY') {
+					print join ", ", @$element;
+					print "|";
+				} else {
+					print $element, "|";
+				}
+			}
+			#print join "|", @$tbl_row{@gt_cols};
 			print "\n";
 			$matching_rows++
 		}
