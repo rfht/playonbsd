@@ -6,6 +6,7 @@ package PlayOnBSD::Main;
 
 # OpenBSD included modules
 
+use Cwd qw(getcwd);					# Cwd(3p)
 #use Encode;		# wide characters in Steam's AppList - encode/decode	# TODO: REALLY NEEDED?
 use File::Basename;					# File::Basename(3p)
 use File::Path qw(remove_tree);				# File::Path(3p), needed for rmtree
@@ -424,10 +425,10 @@ sub download_gog {
 	
 	# TODO: check if game is already installed, if so, error out
 	# update entry in gog-manifest.dat for the $gog_download_os
-	print "\nUpdating gog-manifest.dat for $gog_game\n";
+	print "\nUpdating gog-manifest.dat for $gog_game\n\n";
 	system("gogrepo update -id $match -os $gog_download_os -lang $gog_lang") and die "\nError updating gog-manifest.dat for $gog_game\n";
 
-	print "\nDownloading $gog_game from GOG with gogrepo\n" if $verbosity > 0;
+	print "\nDownloading $gog_game from GOG with gogrepo\n\n" if $verbosity > 0;
 	# TODO: add switch to allow not skipping extras
 	# TODO: some game content has to come from extras (Tanglewood, Broken Sword 1/2)
 	system("gogrepo download -id $match -skipextras $pobgamedir") and die "\nError downloading '$gog_game' with gogrepo\n";
@@ -764,11 +765,7 @@ sub select_field {
 
 	foreach my $tbl_row (@game_table) {
 		if ($tbl_row->{$pattern_colname} =~ /$pattern/) {
-			$ret = $tbl_row->{$ret_colname};
-			if (ref($ret) eq 'ARRAY') {
-				$ret = join ", ", @$ret;
-			}
-			return $ret;
+			return $tbl_row->{$ret_colname};
 		}
 	}
 	return "";
@@ -809,15 +806,24 @@ sub select_rows {
 
 sub setup {
 	my $game = $ARGV[0];
-	$game = "^" . $game . "\$";	# add beginning and end markers for the regex pattern
+	my $game_regex = $game;
+	$game_regex =~ s/[^a-zA-Z0-9]/.?/g;
 
 	# is this a game that needs setup? (generally a PlayOnBSD game, not base or packages)
 	# TODO: currently, parentheses in the game name have to be escaped: Baldur's Gate  \(The Original Saga\)
-	my $setup_array = select_field('name', $game, 'setup') || die "game $game not found in database\n";
+	my $setup_array = select_field('name', "^" . $game . "\$", 'setup') || die "game $game not found in database\n";
 	print "found @$setup_array[0] for setup of $game\n" if $verbosity > 0;
 
 	# TODO: is the game installed?
 	# assume the game is to be found in $pobgamedir
+	my @installed_games = `ls $pobgamedir`;
+	my @setupdir = grep(/^$game_regex/i, @installed_games);
+	die "ERROR: game directory for $game not found in $pobgamedir" if scalar @setupdir < 1;
+	die "ERROR: too many game directories for $game in $pobgamedir" if scalar @setupdir > 1;
+	my $setupdir = $pobgamedir . '/' . $setupdir[0];
+	print "found game directory: $setupdir\n" if $verbosity > 0;
+
+	die "ERROR: setup already completed in $setupdir\n" if (-e $setupdir . '/' . '.pob_setup_done');
 
 	# TODO: check if the game is in an quirks list
 
@@ -827,7 +833,7 @@ sub setup {
 	elsif	(@$setup_array[0] =~ /HTML5/i)		{ die "HTML5 setup not implemented yet\n"; }
 	elsif	(@$setup_array[0] eq 'HumblePlay')	{ die "HumblePlay setup not implemented yet\n"; }
 	elsif	(@$setup_array[0] eq 'dosbox')		{ die "DosBox setup not implemented yet\n"; }
-	elsif	(@$setup_array[0] eq 'fnaify')		{ setup_fnaify(); }
+	elsif	(@$setup_array[0] eq 'fnaify')		{ setup_fnaify($setupdir); }
 	elsif	(@$setup_array[0] eq 'hashlink')		{ setup_hashlink(); }
 	elsif	(@$setup_array[0] eq 'libgdx')		{ setup_libgdx(); }
 	elsif	(@$setup_array[0] eq 'lwjgl')		{ setup_lwjgl(); }
@@ -840,7 +846,21 @@ sub setup {
 }
 
 sub setup_fnaify() {
-	print "in sub ", (caller(0))[3], ", rest not implemented yet\n";
+	my $setupdir = $_[0];
+	chomp $setupdir;
+	my $lastwd = getcwd();
+	chdir($setupdir) or die "ERROR: failed to enter directory $setupdir: $!\n";
+	print "running fnaify setup in $setupdir\n";
+	system("which fnaify >/dev/null 2>&1")
+		and die "ERROR: fnaify not found in PATH\n";
+	print getcwd();
+	system("fnaify -y")
+		and die "ERROR while executing fnaify: $?";
+	# TODO: register somewhere that setup has been completed
+	open(my $fh, ">>", ".pob_setup_done")
+		or die "ERROR: unable to create .pob_setup_done\n";
+	close($fh);
+	chdir($lastwd);
 }
 
 sub setup_hashlink() {
