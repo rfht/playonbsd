@@ -39,7 +39,7 @@ use WWW::Form::UrlEncoded qw( build_urlencoded );	# p5-WWW-Form-UrlEncoded, also
 # pkg_info
 # uname -m
 # depotdownloader
-# py3-gogrepo
+# gogrepo
 # p5-LWP-Protocol-https
 # xdg-utils			# for xdg-open(1)
 # unzip
@@ -81,8 +81,10 @@ my $duration;		# time played so far
 my $last_played;
 my $user_rating;
 my $not_working;
-#my @achievements;	# declare array inside the sub instead
+# declare array @achievements inside the sub
 my $completed;
+
+# gt_cols: list of game table columns
 my @gt_cols = qw(id name version location setup binaries runtime installed duration last_played user_rating not_working achievements completed);
 
 #### Files and Directories ####
@@ -377,17 +379,17 @@ sub download_autodetect {
 
 sub download_gog {
 	my $gog_game =		$ARGV[0];
-	my $gog_download_os =	'linux';
-	my $gog_lang =		'en';
+	my $gog_download_os =	'linux';	# TODO: allow other options
+	my $gog_lang =		'en';		# TODO: allow other languages
 
-	# is py3-gogrepo available?
-	system("which py3-gogrepo >/dev/null 2>&1")
-		and die "ERROR: py3-gogrepo not found in PATH\n";
+	# is gogrepo available?
+	system("which gogrepo >/dev/null 2>&1")
+		and die "ERROR: gogrepo not found in PATH\n";
 
 	# go to directory for gogrepo and check that gog-cookies.dat and gog-manifest.dat exist
 	chdir $gogrepodir;
 	unless (-e 'gog-cookies.dat' and -e 'gog-manifest.dat') {
-		die "ERROR: gog-cookies.dat and/or gog-manifest.dat not found in $gogrepodir. Run 'py3-gogrepo login' and 'py3-gogrepo update' in $gogrepodir\n";
+		die "ERROR: gog-cookies.dat and/or gog-manifest.dat not found in $gogrepodir. Run 'gogrepo login' and 'gogrepo update' in $gogrepodir\n";
 	}
 
 	# Convert the game name into a regex
@@ -404,7 +406,7 @@ sub download_gog {
 	my $game_regex = $gog_game;
 	$game_regex =~ s/[^a-zA-Z0-9]/.?/g;
 	my $gog_titles = `egrep -i \\'title\\'.*$game_regex gog-manifest.dat`;
-	die "ERROR: couldn't find matching title in gog-manifest.dat. Do you need to update py3-gogrepo?\n" unless $gog_titles;
+	die "ERROR: couldn't find matching title in gog-manifest.dat. Do you need to update gogrepo?\n" unless $gog_titles;
 	# first try strictest matching, then relax it gradually
 	# TODO: add selection from $gog_titles by Levenshtein distance
 	$gog_titles =~ /\'($game_regex)\'/i;
@@ -417,18 +419,18 @@ sub download_gog {
 		$gog_titles =~ /[^\']*($game_regex[^\']*)/i;
 		$match = $1;
 	}
-	die "ERROR: couldn't find matching title in gog-manifest.dat. Do you need to update py3-gogrepo?\n" unless $match;
+	die "ERROR: couldn't find matching title in gog-manifest.dat. Do you need to update gogrepo?\n" unless $match;
 	print "Found GOG id match: $match\n";
 	
 	# TODO: check if game is already installed, if so, error out
 	# update entry in gog-manifest.dat for the $gog_download_os
 	print "\nUpdating gog-manifest.dat for $gog_game\n";
-	system("py3-gogrepo update -id $match -os $gog_download_os -lang $gog_lang") and die "\nError updating gog-manifest.dat for $gog_game\n";
+	system("gogrepo update -id $match -os $gog_download_os -lang $gog_lang") and die "\nError updating gog-manifest.dat for $gog_game\n";
 
-	print "\nDownloading $gog_game from GOG with py3-gogrepo\n" if $verbosity > 0;
+	print "\nDownloading $gog_game from GOG with gogrepo\n" if $verbosity > 0;
 	# TODO: add switch to allow not skipping extras
 	# TODO: some game content has to come from extras (Tanglewood, Broken Sword 1/2)
-	system("py3-gogrepo download -id $match -skipextras $pobgamedir") and die "\nError downloading '$gog_game' with py3-gogrepo\n";
+	system("gogrepo download -id $match -skipextras $pobgamedir") and die "\nError downloading '$gog_game' with gogrepo\n";
 
 	my $gog_game_dir = $pobgamedir . "/" . $match;
 	# identify the archive file
