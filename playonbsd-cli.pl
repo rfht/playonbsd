@@ -42,6 +42,7 @@ use WWW::Form::UrlEncoded qw( build_urlencoded );	# p5-WWW-Form-UrlEncoded, also
 # py3-gogrepo
 # p5-LWP-Protocol-https
 # xdg-utils			# for xdg-open(1)
+# unzip
 
 #### Variables ####
 
@@ -708,8 +709,8 @@ sub readconf {
 sub run {
 	print "run, length of ARGV: ", scalar @ARGV, ", ARGV[0]: ", $ARGV[0], "\n" if $verbosity > 0;
 	# exit with pod2usage if no argument provided for playonbsd-cli run
-	shift @ARGV;
 	my $run_game = $ARGV[0];
+	shift @ARGV;
 	pod2usage() unless defined $run_game;
 
 	my $binary = find_gamename_info($run_game, 'binaries');
@@ -721,52 +722,6 @@ sub run {
 		# TODO: save $play_time to database
 	}
 	exit;
-}
-
-sub select_field {
-	# returns value from a specific field in the game table
-	#
-	# parameters:	patter column name, pattern, return column name
-	# return value:	the value in return column name; empty string if not found
-	#
-	# example: to select only rows with empty binaries column:
-	#	./playonbsd-cli.pl -v _execute "select_field('name', '^Timespinner$', 'setup')"
-	#
-	my $pattern_colname = $_[0];
-	my $pattern = $_[1];
-	my $ret_colname = $_[2];
-
-	foreach my $tbl_row (@game_table) {
-		if ($tbl_row->{$pattern_colname} =~ /$pattern/) {
-			return $tbl_row->{$ret_colname};
-		}
-	}
-	return "";
-}
-
-sub select_rows {
-	# prints rows from the game table, selected by pattern in a column
-	#
-	# parameters:	column name, pattern
-	# return value:	number of matching rows
-	#
-	# example: to select only rows with empty binaries column:
-	#	./playonbsd-cli.pl -v _execute "select_rows('binaries', '^$')"
-	#
-	my $colname = $_[0];
-	my $pattern = $_[1];
-	my $matching_rows = 0;
-
-	print join "|", @gt_cols;
-	print "\n";
-	foreach my $tbl_row (@game_table) {
-		if ($tbl_row->{$colname} =~ /$pattern/) {
-			print join "|", @$tbl_row{@gt_cols};
-			print "\n";
-			$matching_rows++
-		}
-	}
-	return $matching_rows;
 }
 
 sub select_column {
@@ -788,6 +743,52 @@ sub select_column {
 		}
 	}
 	return @ret;
+}
+
+sub select_field {
+	# returns value from a specific field in the game table
+	#
+	# parameters:	patter column name, pattern, return column name
+	# return value:	the value in return column name; empty string if not found
+	#
+	# example: to select the game Timespinner and show its setup
+	#	./playonbsd-cli.pl -v _execute "select_field('name', '^Timespinner$', 'setup')"
+	#
+	my $pattern_colname = $_[0];
+	my $pattern = $_[1];
+	my $ret_colname = $_[2];
+
+	foreach my $tbl_row (@game_table) {
+		if ($tbl_row->{$pattern_colname} =~ /$pattern/) {
+			return $tbl_row->{$ret_colname};
+		}
+	}
+	return "";
+}
+
+sub select_rows {
+	# prints rows from the game table, selected by pattern in a column
+	#
+	# parameters:	column name, pattern
+	# return value:	number of matching rows
+	#
+	# example: to select only rows with empty binaries column
+	#	./playonbsd-cli.pl -v _execute "select_rows('binaries', '^$')"
+	#
+	my $colname = $_[0];
+	my $pattern = $_[1];
+	my $matching_rows = 0;
+
+	print join "|", @gt_cols;
+	print "\n";
+	foreach my $tbl_row (@game_table) {
+		if ($tbl_row->{$colname} =~ /$pattern/) {
+			print join "|", @$tbl_row{@gt_cols};
+			print "\n";
+			$matching_rows++
+		}
+	}
+	return $matching_rows;
 }
 
 sub setup {
@@ -890,8 +891,8 @@ GetOptions (	"help|h|?"		=> \$help,
 	or pod2usage(2);
 
 ###### REMOVE THIS AFTER TESTING TO ALLOW WRITING ######
-#$no_write = 1;
-#$temp_table = 1;
+$no_write = 1;
+$temp_table = 1;
 ########################################################
 
 if ($help)		{ pod2usage(1) };
