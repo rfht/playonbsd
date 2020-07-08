@@ -855,7 +855,7 @@ sub setup {
 	close($fh);
 
 	# TODO: add binaries entry for the game ('fnaify' only present in launch script):
-	#	$setupdir . '/' . system("fgrep -l fnaify *");
+	#	$setupdir . '/' . `fgrep -l fnaify *`;
 }
 
 sub setup_fnaify() {
