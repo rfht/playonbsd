@@ -2,7 +2,13 @@
 
 use strict;
 use warnings;
+use feature 'unicode_strings';
 package PlayOnBSD::Main;
+
+$main::VERSION = "0.1-alpha";	# used by Getopt::Long auto_version
+
+use FindBin;
+use lib "$FindBin::Bin/../lib";
 
 # OpenBSD included modules
 
